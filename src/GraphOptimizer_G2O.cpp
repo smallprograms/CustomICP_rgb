@@ -10,7 +10,13 @@ GraphOptimizer_G2O::GraphOptimizer_G2O()
 {
   //  optimizer.setMethod(g2o::SparseOptimizer::LevenbergMarquardt);
     optimizer.setVerbose(false);
-    linearSolver = new g2o::LinearSolverCholmod<g2o::BlockSolverX::PoseMatrixType>();
+    // variable-size block solver
+    g2o::BlockSolverX::LinearSolverType * linearSolver = new g2o::LinearSolverDense<g2o::BlockSolverX::PoseMatrixType>();
+    g2o::BlockSolverX * solver_ptr = new g2o::BlockSolverX(linearSolver);
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    optimizer.setAlgorithm(solver);
+
+    //linearSolver = new g2o::LinearSolverCholmod<g2o::BlockSolverX::PoseMatrixType>();
     //solver_ptr = new g2o::BlockSolverX(&optimizer,linearSolver);
     //optimizer.setSolver(solver_ptr);
 
@@ -45,8 +51,11 @@ int GraphOptimizer_G2O::addVertex(Eigen::Matrix4f& vertexPose)
 
     // set up node
     g2o::VertexSE3 *vc = new g2o::VertexSE3();
-    //vc->estimate() = pose;
+    Eigen::Isometry3d cam; // camera pose
+    cam = q;
+    cam.translation() = t;
 
+    vc->setEstimate(cam);
     vc->setId(vertexIdx);      // vertex id
 
     // set first pose fixed
@@ -110,7 +119,7 @@ void GraphOptimizer_G2O::optimizeGraph()
 
     //Set the initial Levenberg-Marquardt lambda
     //optimizer.setUserLambdaInit(0.01);
-
+    optimizer.setVerbose(true);
     //Run optimization
     optimizer.optimize(10);
 }
@@ -175,6 +184,6 @@ void GraphOptimizer_G2O::genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src
     icp.setInputTarget(tgt);
     icp.align(notUsed);
     relPose = icp.getFinalTransformation();
-    infMatrix = Eigen::Matrix<double,6,6>::Identity()*icp.getFitnessScore();
+    infMatrix = Eigen::Matrix<double,6,6>::Identity();//*icp.getFitnessScore();
 }
 

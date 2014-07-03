@@ -154,9 +154,6 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground ) {
 void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int min, int max, char* outFile, char* global ) {
 
     CustomICP icp;
-    SobelFilter<pcl::PointXYZRGB> sobFilter;
-    pcl::PointCloud<pcl::PointXYZRGB> sobelCloud(640,480);
-
     pcl::FastBilateralFilter<pcl::PointXYZRGB> fastBilFilter;
     pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
     voxelFilter.setLeafSize(0.0025,0.0025,0.0025);
@@ -177,6 +174,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 k++;
 
             }
+            std::cout << "LOADING previous transf\n\n\n";
             transf << num[0],num[1],num[2],num[3],num[4],num[5],num[6],num[7],num[8],num[9],num[10],num[11],num[12],num[13],num[14],num[15];
         } else {
             std::cout << "Can't read transformation file\n";
@@ -193,9 +191,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     pcl::PointCloud<pcl::PointXYZRGB> globalCloud;
     //register method to capture keyboard events
     viewer->registerKeyboardCallback( keyboardEventOccurred );
-
-
-
 
     //name of cloud file
     std::stringstream ss;
@@ -224,6 +219,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     GraphOptimizer_G2O optimizer;
     std::deque< pcl::PointCloud<pcl::PointXYZRGB> > cloudQueue;
     //cloudQueue.resize(4);
+
 
     //read file by file
     for(int i=min+1; i <= max; i++) {
@@ -264,11 +260,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             /** end read next cloud **/
 
 
-            //icp needs not dense clouds
-            pcl::PointCloud<pcl::PointXYZRGB> currCloudNotDense;
-            std::vector<int> vec1;
-            //pcl::removeNaNFromPointCloud( currCloud, currCloudNotDense, vec1);
-
             //apply voxel filter to curr cloud
 //            voxelFilter.setInputCloud(currCloudNotDense.makeShared());
 //            voxelFilter.filter(currCloudNotDense);
@@ -284,47 +275,40 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             pcl::PointCloud<pcl::PointXYZRGB> finalCloud(640,480);;
             icp.align (finalCloud);
             pcl::copyPointCloud(currCloud,prevCloud);
-            std::cout << "BE LOOP\n";
-            //std::deque< pcl::PointCloud<pcl::PointXYZRGB> >::iterator
-            int fromIndex=i-1;
-            //add edges to optimizer
-            /
-            for(std::deque< pcl::PointCloud<pcl::PointXYZRGB> >::iterator iter = cloudQueue.begin();
-                iter != cloudQueue.end(); iter++ ) {
 
-                //TO TO: generate Vector of relPos and infMatrix, we need all the graph in memory
-                Eigen::Matrix4f relPose;
-                Eigen::Matrix<double,6,6> infMatrix;
-                std::cout << "generating data\n";
-                std::cout << currCloud.size() << " ::::: " << iter->size() << "\n";
-                optimizer.genEdgeData(currCloud.makeShared(),iter->makeShared(),relPose,infMatrix);
-                //WRONG INDEXS!!
-                optimizer.addEdge(fromIndex,i,relPose,infMatrix);
-                fromIndex--;
-                std::cout << "INFO MAT " << infMatrix << "\n";
+            //update global transformation
+            transf = icp.getFinalTransformation() * transf;
+            int vertexID = optimizer.addVertex(transf);
+
+            if( vertexID > 0 ) {
+                int toIndex=vertexID-1;
+                //add edges to optimizer
+                std::cout << "generating edges \n\n\n";
+                //read cloud by cloud starting by the newest
+                for(std::deque< pcl::PointCloud<pcl::PointXYZRGB> >::reverse_iterator iter = cloudQueue.rbegin();
+                    iter != cloudQueue.rend(); iter++ ) {
+
+                    Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
+                    Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
+                    optimizer.genEdgeData(currCloud.makeShared(),iter->makeShared(),*relPose,*infMatrix);
+                    optimizer.addEdge(vertexID, toIndex,*relPose,*infMatrix);
+                    std::cout << "Adding edge: " << vertexID << ":::" << toIndex << "\n";
+                    toIndex--;
+
+                }
+                std::cout << "\n\n\n";
             }
-            std::cout << "AFF LOOP\n";
+
             //add cloud to queue
             cloudQueue.push_back(currCloud);
-            const int QSIZE=5;
+            const int QSIZE=3;
             //mantain a constant size
             if ( cloudQueue.size() >= QSIZE ) {
                 cloudQueue.pop_front();
             }
 
-
-            //pcl::copyPointCloud(prevCloud,sobelCloud);
-            //apply edge filter to target cloud
-
-            //sobFilter.setInputCloud(prevCloud.makeShared());
-            //sobFilter.applyFilter(sobelCloud);
-            //passs edge filtered cloud to icp
-            //customCorresp.sobelCloud = sobelCloud;
-
-
-            transf = icp.getFinalTransformation() * transf;
-            optimizer.addVertex(transf);
-            writeTransformation(icp.getFinalTransformation(), std::string(outFile) + std::string(".movements"));
+            //writeTransformation(icp.getFinalTransformation(), std::string(outFile) + std::string(".movements"));
+            writeTransformation(transf, std::string(outFile) + std::string(".movements"));
             pcl::transformPointCloud(currCloud,finalCloud,transf);
 
             pcl::Correspondences cor = icp.getCorrespondences();
@@ -374,7 +358,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >  poses;
     optimizer.getPoses(poses);
     for( std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >::iterator iter = poses.begin(); iter != poses.end(); iter++ ) {
-        writeTransformation(*iter,"optimized_poses.txt");
+        writeTransformation(*iter,std::string(outFile) + std::string(".optimized"));
     }
 
     while( !viewer->wasStopped() ) {

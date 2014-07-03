@@ -6,7 +6,7 @@ CustomICP::CustomICP()
     icp.setCorrespondenceEstimation(
     boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
     icp.setMaxCorrespondenceDistance(0.003);
-    icp.setMaximumIterations (10);
+    icp.setMaximumIterations (5);
     prevTransf = Eigen::Matrix4f::Identity();
 
 }

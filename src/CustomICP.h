@@ -26,6 +26,7 @@ public:
     pcl::PointCloud<pcl::PointXYZRGB> getSourceFiltered();
     pcl::PointCloud<pcl::PointXYZRGB> getTargetFiltered();
     double getFitnessScore();
+    void setPrevTransf(Eigen::Matrix4f prevT);
 
 
 private:

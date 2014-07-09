@@ -235,7 +235,6 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
         dist = dist*dist;
         dist = dist + (cornersCloudA[j].y - cornersCloudB[j].y)*(cornersCloudA[j].y - cornersCloudB[j].y);
         dist = dist + (cornersCloudA[j].z - cornersCloudB[j].z)*(cornersCloudA[j].z - cornersCloudB[j].z);
-        std::cout << std::sqrt(dist) << "\n";
         corrVec.push_back(pcl::Correspondence(j,j,dist));
     }
 
@@ -246,7 +245,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
         tEst.estimateRigidTransformation(cornersCloudA,cornersCloudB,corrVec,transfMat);
 
     }
-    std::cout << transfMat << "\n";
+
     return transfMat;
 }
 

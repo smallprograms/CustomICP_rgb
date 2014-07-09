@@ -1,4 +1,4 @@
-#include "CustomICP.h"
+﻿#include "CustomICP.h"
 
 CustomICP::CustomICP()
 {
@@ -35,9 +35,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     //oflowTransf = Eigen::Matrix4f::Identity();
     pcl::PointCloud<pcl::PointXYZRGB> sobTgt(640,480);
     pcl::PointCloud<pcl::PointXYZRGB> sobSrc(640,480);
-    //source/target sobel cloud with globalTransform
-    pcl::PointCloud<pcl::PointXYZRGB> sobSrcMoved(640,480);
-    pcl::PointCloud<pcl::PointXYZRGB> sobTgtMoved(640,480);
+
 
     sobFilter.setInputCloud(tgt);
     sobFilter.applyFilter(sobTgt);
@@ -72,27 +70,13 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
 //        pcl::io::savePCDFileASCII("sobSrc.pcd",srcNonDense);
         saveSobel = false;
     }
-
-    std::cout << "sizeT...:::: " << tgtNonDense.size() << "\n";
-    std::cout << "sizeS...:::: " << srcNonDense.size() << "\n";
+    std::cout << "tgt,src sizes" << tgtNonDense.size() << "," << srcNonDense.size() << "\n";
+    std::cout << "oflow T " << oflowTransf << "\n";
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());
     icp.align(cloud,oflowTransf);
     prevTransf = icp.getFinalTransformation();
 
-    //apply ICP over original point clouds
-//    std::vector<int> indices;
-//    pcl::removeNaNFromPointCloud(*tgt,*tgt, indices);
-//    pcl::removeNaNFromPointCloud(*src,*src, indices);
-
-//    std::cout << "non sobel sizeT...:::: " << tgt->size() << "\n";
-//    std::cout << "non sobel sizeS...:::: " << src->size() << "\n";
-    //apply icp over entire cloud (no filter)
-//    icp.setMaximumIterations(10);
-//    icp.setInputTarget(tgt);
-//    icp.setInputSource(src);
-//    icp.align(cloud,sobelTransf);
-    //icp.getFinalTransformation();
 }
 
 Eigen::Matrix4f CustomICP::getFinalTransformation() {
@@ -122,6 +106,11 @@ double CustomICP::getFitnessScore()
 
     return icp.getFitnessScore();
 
+}
+
+void CustomICP::setPrevTransf(Eigen::Matrix4f prevT)
+{
+    prevTransf = prevT;
 }
 
 

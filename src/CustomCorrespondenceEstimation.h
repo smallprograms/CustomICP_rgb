@@ -92,7 +92,7 @@ template<typename PointSource, typename PointTarget,typename Scalar>
 void CustomCorrespondenceEstimation<PointSource,PointTarget,Scalar>::determineCorrespondences (pcl::Correspondences &correspondences,
                                double max_distance) {
 
-    std::cout << "MAX DIST::::" << max_distance << "\n\n";
+
     PointCloudSourceConstPtr sourceCloud = pcl::registration::CorrespondenceEstimation<PointSource,PointTarget>::getInputSource();
     PointCloudSourceConstPtr targetCloud = pcl::registration::CorrespondenceEstimation<PointSource,PointTarget>::getInputTarget();
 

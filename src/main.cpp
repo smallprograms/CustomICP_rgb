@@ -25,17 +25,46 @@ void keyboardEventOccurred (const pcl::visualization::KeyboardEvent &event,
 
 }
 
-void writeTransformation(Eigen::Matrix4f transf, std::string fileName) {
+void writeTransformationQuaternion(Eigen::Matrix4f transf, std::string fileName) {
 
     std::cout << transf.col(0)[0];
     Eigen::Matrix3f rot = transf.block(0,0,3,3);
     Eigen::Quaternionf quat(rot);
     std::ofstream file(fileName.c_str(), ios::out | ios::app);
-    std::cout << "TRANSFORMATION::\n\n";
-    std::cout << transf << "\n\n";
-    std::cout << transf.col(3)[0] << " " << transf.col(3)[1] << " " << transf.col(3)[2];
     file << transf.col(3)[0] << " " << transf.col(3)[1] << " " << transf.col(3)[2] << " " << quat.x() << " " << quat.y() << " " << quat.z() << " " << quat.w() << "\n";
     file.close();
+}
+
+void writeTransformationMatrix(Eigen::Matrix4f transf, std::string fileName) {
+
+    std::ofstream ofs(fileName.c_str());
+    if( ofs.is_open() ) {
+        std::cout << "write to " << fileName << "\n";
+        ofs << transf;
+    }
+    ofs.close();
+}
+
+Eigen::Matrix4f loadTransformationMatrix(std::string fileName) {
+
+    std::ifstream transfFile(fileName.c_str());
+    Eigen::Matrix4f transf;
+
+    if( transfFile.is_open() ) {
+        float num[16];
+        int k=0;
+        while( transfFile >> num[k]) {
+            k++;
+
+        }
+        transf << num[0],num[1],num[2],num[3],num[4],num[5],num[6],num[7],num[8],num[9],num[10],num[11],num[12],num[13],num[14],num[15];
+        transfFile.close();
+        return transf;
+    } else {
+        std::cout << "Can't read transformation file\n";
+        return Eigen::Matrix4f::Identity();
+    }
+
 }
 
 int endswith(const char* haystack, const char* needle)
@@ -74,10 +103,7 @@ void saveState(const pcl::PointCloud<pcl::PointXYZRGB>& globalCloud, const Eigen
     std::cerr << "Saved " << globalCloud.points.size () << " data points to " << outFile << "\n";
     std::string fileTransf(outFile);
     fileTransf += ".transf";
-    std::ofstream ofs(fileTransf.c_str());
-    if( ofs.is_open() ) {
-        ofs << transf;
-    }
+    writeTransformationMatrix(transf,fileTransf);
 }
 
 void mergeClouds(pcl::PointCloud<pcl::PointXYZRGB>& globalCloud, const pcl::PointCloud<pcl::PointXYZRGB>& newCloud) {
@@ -164,25 +190,17 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
     //if loading a previous reconstruction, transf is not identity!
     if( loadedGlobal ) {
+
         std::string transfName(global);
+        std::string prevTransfName(global);
         transfName += ".transf";
-        std::ifstream transfFile(transfName.c_str());
-        if( transfFile.is_open() ) {
-            float num[16];
-            int k=0;
-            while( transfFile >> num[k]) {
-                k++;
-
-            }
-            std::cout << "LOADING previous transf\n\n\n";
-            transf << num[0],num[1],num[2],num[3],num[4],num[5],num[6],num[7],num[8],num[9],num[10],num[11],num[12],num[13],num[14],num[15];
-        } else {
-            std::cout << "Can't read transformation file\n";
-            return;
-        }
-
+        transf = loadTransformationMatrix(transfName);
+        prevTransfName += ".prevtransf";
+        Eigen::Matrix4f prevTransf = Eigen::Matrix4f::Identity();
+        prevTransf = loadTransformationMatrix(prevTransfName);
+        icp.setPrevTransf(prevTransf);
         std::cout << "readed : " << transf << "\n";
-
+        std::cout << "and readed : " << prevTransf << "\n";
 
     }
     //previous cloud
@@ -200,6 +218,9 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         std::cout << "Failed to read first cloud \n";
         return;
     }
+
+    fastBilFilter.setInputCloud(prevCloud.makeShared());
+    fastBilFilter.filter(prevCloud);
 
     //if loading prev reconstr, globalCloud is not empty at init
     if( loadedGlobal ) {
@@ -242,18 +263,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             if( pcl::io::loadPCDFile<pcl::PointXYZRGB>(ss.str(), currCloud) == -1 ) {
 
                 std::cout << "Reading end at " << i << "\n";
-                while( !viewer->wasStopped() ) {
-
-                    if(saveAndQuit) {
-
-                        saveState(globalCloud,transf,outFile);
-                        return;
-                    }
-
-                    viewer->spinOnce (100);
-                    boost::this_thread::sleep (boost::posix_time::microseconds (100000));
-
-                }
+                break;
 
             }
 
@@ -264,8 +274,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 //            voxelFilter.setInputCloud(currCloudNotDense.makeShared());
 //            voxelFilter.filter(currCloudNotDense);
             //Apply bilateral filter
-            fastBilFilter.setInputCloud(prevCloud.makeShared());
-            fastBilFilter.filter(prevCloud);
             fastBilFilter.setInputCloud(currCloud.makeShared());
             fastBilFilter.filter(currCloud);
 
@@ -275,15 +283,15 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             pcl::PointCloud<pcl::PointXYZRGB> finalCloud(640,480);;
             icp.align (finalCloud);
             pcl::copyPointCloud(currCloud,prevCloud);
-
+            std::cout << "bef update curr " << i << transf << "\n";
             //update global transformation
             transf = icp.getFinalTransformation() * transf;
+            std::cout << "af update curr " << i << transf << "\n";
             int vertexID = optimizer.addVertex(transf);
 
             if( vertexID > 0 ) {
                 int toIndex=vertexID-1;
                 //add edges to optimizer
-                std::cout << "generating edges \n\n\n";
                 //read cloud by cloud starting by the newest
                 for(std::deque< pcl::PointCloud<pcl::PointXYZRGB> >::reverse_iterator iter = cloudQueue.rbegin();
                     iter != cloudQueue.rend(); iter++ ) {
@@ -292,11 +300,9 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
                     optimizer.genEdgeData(currCloud.makeShared(),iter->makeShared(),*relPose,*infMatrix);
                     optimizer.addEdge(vertexID, toIndex,*relPose,*infMatrix);
-                    std::cout << "Adding edge: " << vertexID << ":::" << toIndex << "\n";
                     toIndex--;
 
                 }
-                std::cout << "\n\n\n";
             }
 
             //add cloud to queue
@@ -308,7 +314,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             }
 
             //writeTransformation(icp.getFinalTransformation(), std::string(outFile) + std::string(".movements"));
-            writeTransformation(transf, std::string(outFile) + std::string(".movements"));
+            writeTransformationQuaternion(transf, std::string(outFile) + std::string(".movements"));
             pcl::transformPointCloud(currCloud,finalCloud,transf);
 
             pcl::Correspondences cor = icp.getCorrespondences();
@@ -339,15 +345,15 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
 
             if(saveAndQuit) {
-                saveState(globalCloud,transf,outFile);
-                return;
+                break;
             }
 
         } else {
             while( !viewer->wasStopped() ) {
                 viewer->spinOnce (100);
                 boost::this_thread::sleep (boost::posix_time::microseconds (100000));
-                if( doNext ) break;
+                if( doNext || saveAndQuit ) break;
+
             }
             //dont skip the current capture
             --i;
@@ -357,23 +363,25 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     optimizer.optimizeGraph();
     std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >  poses;
     optimizer.getPoses(poses);
+
+
     for( std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >::iterator iter = poses.begin(); iter != poses.end(); iter++ ) {
-        writeTransformation(*iter,std::string(outFile) + std::string(".optimized"));
+        writeTransformationQuaternion(*iter,std::string(outFile) + std::string(".optimized"));
     }
 
+    std::string prevTransfFile(outFile);
+    prevTransfFile += ".prevtransf";
+    writeTransformationMatrix(icp.getFinalTransformation(),prevTransfFile);
+    saveState(globalCloud,transf,outFile);
+    return;
+
+
     while( !viewer->wasStopped() ) {
-
-        if(saveAndQuit) {
-
-            saveState(globalCloud,transf,outFile);
-            return;
-        }
 
         viewer->spinOnce (100);
         boost::this_thread::sleep (boost::posix_time::microseconds (100000));
 
     }
-
 
     voxelFilter.setInputCloud(globalCloud.makeShared());
     voxelFilter.filter(globalCloud);

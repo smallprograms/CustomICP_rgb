@@ -68,7 +68,7 @@ void sortCloud( pcl::PointCloud<pcl::PointXYZ>& cornersCloudA,  pcl::PointCloud<
 
 }
 
-Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudB) {
+Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudB, float maxCorrespDist) {
 
     cv::Mat imgAcolor(480,640,CV_8UC3);
     cloudToMat(cloudA,imgAcolor);
@@ -83,16 +83,14 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     cv::Size img_sz = imgA.size();
 
     int win_size = 25;
-    int maxCorners = 20;
-    double qualityLevel = 0.05;
+    int maxCorners = 40;
+    double qualityLevel = 0.01;
     double minDistance = 5.0;
-    int blockSize = 3;
-    double k = 0.04;
+
     std::vector<cv::Point2f> cornersA;
     cornersA.reserve(maxCorners);
     std::vector<cv::Point2f> cornersB;
     cornersB.reserve(maxCorners);
-
 
     goodFeaturesToTrack( imgA,cornersA,maxCorners,qualityLevel,minDistance,cv::Mat());
     goodFeaturesToTrack( imgB,cornersB,maxCorners,qualityLevel,minDistance,cv::Mat());
@@ -104,8 +102,6 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
             cv::TermCriteria( CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 20, 0.03 ) );
 
     // Call Lucas Kanade algorithm
-
-    CvSize pyr_sz = cv::Size( img_sz.width+8, img_sz.height/3 );
 
     std::vector<uchar> features_found;
     features_found.reserve(maxCorners);
@@ -131,6 +127,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     Eigen::Matrix4f transfMat = Eigen::Matrix4f::Identity();
 
     for( int i=0; i < features_found.size(); i++ ){
+
         if( feature_errors[i] < 60) {
 
             cv::Point p0( round( cornersA[i].x ), round( cornersA[i].y ) );
@@ -158,7 +155,10 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
 
                     float dist = dir.x*dir.x + dir.y*dir.y + dir.z*dir.z;
                     dist = std::sqrt(dist);
-                    if( dist > 0.05 ) continue;
+                    if( dist > maxCorrespDist /** 20 sep: 0.05*/ ) {
+                        std::cout << "skiping correspondence in oflow, with dist:" << dist << "\n";
+                        continue;
+                    }
                     cornersCloudA.push_back( pointA );
                     cornersCloudB.push_back( pointB );
 
@@ -174,22 +174,22 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
         }
     }
 
-//    static int number=0;
-//    number++;
-//    std::stringstream str1;
-//    str1 << number;
-//    std::string name = "oflow" + str1.str() + ".jpg";
-//    imwrite(name.c_str(),imgAcolor);
-//    ++number;
-//    std::stringstream str2;
-//    str2 << number;
-//    name = "oflow" + str2.str() + ".jpg";
-//    imwrite(name.c_str(),imgBcolor);
-//    ++number;
-//    std::stringstream str3;
-//    str3 << number;
-//    name = "oflow" + str3.str() + ".jpg";
-//    imwrite(name.c_str(),imgC);
+    static int number=0;
+    number++;
+    std::stringstream str1;
+    str1 << number;
+    std::string name = "oflow" + str1.str() + ".jpg";
+    imwrite(name.c_str(),imgAcolor);
+    ++number;
+    std::stringstream str2;
+    str2 << number;
+    name = "oflow" + str2.str() + ".jpg";
+    imwrite(name.c_str(),imgBcolor);
+    ++number;
+    std::stringstream str3;
+    str3 << number;
+    name = "oflow" + str3.str() + ".jpg";
+    imwrite(name.c_str(),imgC);
 
     /** calculate a median direction, conserve the three points closest to the median direction.
       this code must be rewrited, just for test **/
@@ -239,6 +239,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     }
 
     pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ,float_t> tEst;
+    std::cout << "2244555oflow 3D points A: " << cornersCloudA.size() << " B: " << cornersCloudB.size() << "\n";
     if(/*finalCornersA.size()*/ cornersCloudA.size() > 2) {
 
         //tEst.estimateRigidTransformation(finalCornersA,finalCornersB,corrVec,transfMat);

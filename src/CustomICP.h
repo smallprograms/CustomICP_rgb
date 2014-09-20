@@ -27,7 +27,9 @@ public:
     pcl::PointCloud<pcl::PointXYZRGB> getTargetFiltered();
     double getFitnessScore();
     void setPrevTransf(Eigen::Matrix4f prevT);
-
+    void setOflowStop(bool val);
+    bool foundOflowTransf();
+    void randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDist, float maxCorDist, float maxFit, int maxIter, float& bestFit, int& numCorresp);
 
 private:
     //use our custom correspondences estimator
@@ -40,6 +42,11 @@ private:
     pcl::PointCloud<pcl::PointXYZRGB>  tgtNonDense;
     Eigen::Matrix4f oflowTransf;
     Eigen::Matrix4f prevTransf;
+    Eigen::Matrix4f finalTransf;
+    double fitness;
+    bool oflowFound;
+    bool stopIfOflowFails;
+    pcl::Correspondences correspondences;
 };
 
 #endif // CUSTOMICP_H

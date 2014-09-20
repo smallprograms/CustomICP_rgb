@@ -3,6 +3,7 @@
 #include <pcl/registration/correspondence_estimation.h>
 #include <pcl/search/organized.h>
 #include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/octree/octree.h>
 #include <pcl/common/geometry.h>
 #include "SobelFilter.h"
 
@@ -92,12 +93,16 @@ template<typename PointSource, typename PointTarget,typename Scalar>
 void CustomCorrespondenceEstimation<PointSource,PointTarget,Scalar>::determineCorrespondences (pcl::Correspondences &correspondences,
                                double max_distance) {
 
-
+    std::cout << " GG kkkxkkxkkkxkkx IIIIN DET CORRESP\n\n";
     PointCloudSourceConstPtr sourceCloud = pcl::registration::CorrespondenceEstimation<PointSource,PointTarget>::getInputSource();
     PointCloudSourceConstPtr targetCloud = pcl::registration::CorrespondenceEstimation<PointSource,PointTarget>::getInputTarget();
 
-    pcl::KdTreeFLANN<PointTarget> orgSearch;
-    orgSearch.setInputCloud(targetCloud);
+//    pcl::KdTreeFLANN<PointTarget> orgSearch;
+//    orgSearch.setInputCloud(targetCloud);
+    float resolution = 128.0f;
+    pcl::octree::OctreePointCloudSearch<pcl::PointXYZRGB> octree (resolution);
+    octree.setInputCloud (targetCloud);
+    octree.addPointsFromInputCloud();
 
     // K nearest neighbor search
     int k = 1;
@@ -106,42 +111,59 @@ void CustomCorrespondenceEstimation<PointSource,PointTarget,Scalar>::determineCo
     //erase previous correspondences (reset vector)
     correspondences.clear();
     //search closest point in targetCLoud for each sourceCloud point
-
+    std::cout << "\n\n\n customcorresp CLOUD SIZE:::::::" << sourceCloud->points.size() << "\n\n\n";
     for (int i=0; i < sourceCloud->points.size(); i++) {
 
+        //ignore non finite points
+        if( sourceCloud->points[i].z == std::numeric_limits<float>::quiet_NaN() ) {
+            std::cout << "non finite poiint at source!!!!! " << sourceCloud->points[i] << "\n";
+            continue;
+        }
 
-        if(orgSearch.radiusSearch(sourceCloud->points[i],max_distance,pointIdxNKNSearch,pointNKNSquaredDistance) > 0) {
+        //if( orgSearch.radiusSearch(sourceCloud->points[i],max_distance,pointIdxNKNSearch,pointNKNSquaredDistance) > 0 ) {
+       if( octree.radiusSearch(sourceCloud->points[i],max_distance,pointIdxNKNSearch,pointNKNSquaredDistance) > 0 ) {
 
+            if( targetCloud->points[ pointIdxNKNSearch[0] ].z == std::numeric_limits<float>::quiet_NaN() ) {
+                std::cout << "non finite point at TARGETT!!!! " <<  targetCloud->points[ pointIdxNKNSearch[0] ] << "\n";
+                continue;
+            }
             //add correspondence
             if( pointNKNSquaredDistance.at(0)  < (max_distance*max_distance) ) {
 
-  /*              Eigen::Vector3i rgbSource = sourceCloud->points[i].getRGBVector3i();
+                Eigen::Vector3i rgbSource = sourceCloud->points[i].getRGBVector3i();
                 Eigen::Vector3i rgbTarget = targetCloud->points[pointIdxNKNSearch[0]].getRGBVector3i();
-                float hueSource = getHue(rgbSource);
-                float hueTarget = getHue(rgbTarget)*/;
-
+                Eigen::Vector3i rgbDiffVec = rgbSource - rgbTarget;
+                float rgbDiff = rgbDiffVec.norm();
+//                float hueSource = getHue(rgbSource);
+//                float hueTarget = getHue(rgbTarget);
+                //std::cout << sourceCloud->points[i] << " " << targetCloud->points[pointIdxNKNSearch[0]] << "\n";
                 pcl::Correspondence corresp;
                 corresp.index_query = i;
                 corresp.index_match = pointIdxNKNSearch[0];
                 corresp.distance = pointNKNSquaredDistance.at(0);
-                //corresp.weight = 1.0;
+                corresp.weight = 1.0;
                 //std::cout << "Corresp: " << corresp.index_match << " " << corresp.distance << "    " << corresp.index_query << "\n";
-                //corresp.weight = 1.0f - std::min( (double)(hueTarget -hueSource)*(hueTarget-hueSource)/(360.0f*360.0f), 1.0 );
+//              corresp.weight = 1.0f - std::min( (double)(hueTarget -hueSource)*(hueTarget-hueSource)/(360.0f*360.0f), 1.0 );
+//                std::cout << "color source:: " << rgbSource << "\n";
+//                std::cout << "color target:: " << rgbTarget << "\n";
+//                std::cout << "weight " << corresp.weight << "\n";
 //                uint zBlue = 255;
 //                uint zGreen = 0;//gP/W;
-//                uint zRed = 0;//rP/W;
+//                uint zRed = 0;//rP2/W;
 //                uint rgba = zRed << (uint)24 | zBlue << (uint)16 | zGreen << (uint)8;
 //                if( sobelCloud.points[i].rgba == rgba ) {
 //                    corresp.weight = 1.0f;
 //                }
-              //  if( corresp.weight > 0.7) {
+               //if( rgbDiff < 20 &&  targetCloud->points[ pointIdxNKNSearch[0] ].x > 0.2 ) {
+                    //std::cout << "WIEGHT " << corresp.weight << "\n";
                     correspondences.push_back(corresp);
-                //}
-            }
+               //}
+            } //end if < max
          }
-        }
+        } //end for
 
     corresp = correspondences;
+    std::cout << "SIZE dddddda111111 CORRES0nd3n octreee::: " << correspondences.size() << "\n";
 
 
 

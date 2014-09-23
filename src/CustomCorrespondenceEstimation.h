@@ -93,16 +93,13 @@ template<typename PointSource, typename PointTarget,typename Scalar>
 void CustomCorrespondenceEstimation<PointSource,PointTarget,Scalar>::determineCorrespondences (pcl::Correspondences &correspondences,
                                double max_distance) {
 
-    std::cout << " GG kkkxkkxkkkxkkx IIIIN DET CORRESP\n\n";
+    std::cout << " inside DET CORRESP\n\n";
     PointCloudSourceConstPtr sourceCloud = pcl::registration::CorrespondenceEstimation<PointSource,PointTarget>::getInputSource();
     PointCloudSourceConstPtr targetCloud = pcl::registration::CorrespondenceEstimation<PointSource,PointTarget>::getInputTarget();
 
-//    pcl::KdTreeFLANN<PointTarget> orgSearch;
-//    orgSearch.setInputCloud(targetCloud);
-    float resolution = 128.0f;
-    pcl::octree::OctreePointCloudSearch<pcl::PointXYZRGB> octree (resolution);
-    octree.setInputCloud (targetCloud);
-    octree.addPointsFromInputCloud();
+    pcl::KdTreeFLANN<PointTarget> tree;
+    tree.setInputCloud(targetCloud);
+
 
     // K nearest neighbor search
     int k = 1;
@@ -114,26 +111,25 @@ void CustomCorrespondenceEstimation<PointSource,PointTarget,Scalar>::determineCo
     std::cout << "\n\n\n customcorresp CLOUD SIZE:::::::" << sourceCloud->points.size() << "\n\n\n";
     for (int i=0; i < sourceCloud->points.size(); i++) {
 
-        //ignore non finite points
-        if( sourceCloud->points[i].z == std::numeric_limits<float>::quiet_NaN() ) {
-            std::cout << "non finite poiint at source!!!!! " << sourceCloud->points[i] << "\n";
-            continue;
-        }
 
-        //if( orgSearch.radiusSearch(sourceCloud->points[i],max_distance,pointIdxNKNSearch,pointNKNSquaredDistance) > 0 ) {
-       if( octree.radiusSearch(sourceCloud->points[i],max_distance,pointIdxNKNSearch,pointNKNSquaredDistance) > 0 ) {
-
-            if( targetCloud->points[ pointIdxNKNSearch[0] ].z == std::numeric_limits<float>::quiet_NaN() ) {
-                std::cout << "non finite point at TARGETT!!!! " <<  targetCloud->points[ pointIdxNKNSearch[0] ] << "\n";
-                continue;
-            }
+        if( tree.nearestKSearch(sourceCloud->points[i], 1, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 ) {
             //add correspondence
             if( pointNKNSquaredDistance.at(0)  < (max_distance*max_distance) ) {
 
-                Eigen::Vector3i rgbSource = sourceCloud->points[i].getRGBVector3i();
-                Eigen::Vector3i rgbTarget = targetCloud->points[pointIdxNKNSearch[0]].getRGBVector3i();
-                Eigen::Vector3i rgbDiffVec = rgbSource - rgbTarget;
-                float rgbDiff = rgbDiffVec.norm();
+                static bool onePrint = true;
+                if( onePrint ) {
+                    if( pointNKNSquaredDistance.at(0) > 0.2 && pointNKNSquaredDistance.size() > 10 ) {
+                        for( int k=0; k < 10; k++ ) {
+                            std::cout << "DISTANCE " << k << " :" << pointNKNSquaredDistance.at(k) << "\n";
+                        }
+                        onePrint=false;
+                    }
+                }
+
+//                Eigen::Vector3i rgbSource = sourceCloud->points[i].getRGBVector3i();
+//                Eigen::Vector3i rgbTarget = targetCloud->points[pointIdxNKNSearch[0]].getRGBVector3i();
+//                Eigen::Vector3i rgbDiffVec = rgbSource - rgbTarget;
+//                float rgbDiff = rgbDiffVec.norm();
 //                float hueSource = getHue(rgbSource);
 //                float hueTarget = getHue(rgbTarget);
                 //std::cout << sourceCloud->points[i] << " " << targetCloud->points[pointIdxNKNSearch[0]] << "\n";
@@ -163,7 +159,7 @@ void CustomCorrespondenceEstimation<PointSource,PointTarget,Scalar>::determineCo
         } //end for
 
     corresp = correspondences;
-    std::cout << "SIZE dddddda111111 CORRES0nd3n octreee::: " << correspondences.size() << "\n";
+    std::cout << "correspondences size::: " << correspondences.size() << "\n";
 
 
 

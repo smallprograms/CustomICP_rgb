@@ -7,7 +7,8 @@ CustomICP::CustomICP()
     customCorresp = new CustomCorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float>;
     icp.setCorrespondenceEstimation(
     boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
-    icp.setMaxCorrespondenceDistance(0.003);
+    //icp.setMaxCorrespondenceDistance(0.003); //22 sept
+    icp.setMaxCorrespondenceDistance(0.025);
     icp.setMaximumIterations (25);
     icp.setTransformationEpsilon(1e-8);
     icp.setEuclideanFitnessEpsilon(1e-8);
@@ -34,6 +35,7 @@ void CustomICP::setInputTarget( pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt ) {
 
 void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
 {
+    //for max 3D distance of projected optical flow correspondences
     float maxCorrespDist = 0.05;
     //optical flow to calculate initial transformation
     oflowTransf = getOflow3Dtransf(src,tgt,maxCorrespDist);
@@ -77,7 +79,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     if( saveSobel ) {
         pcl::io::savePCDFileASCII("sobTgtBef.pcd",sobTgt);
         pcl::io::savePCDFileASCII("sobSrcBef.pcd",sobSrc);
-
+        saveSobel=false;
     }
 
     /** Generate clouds without NaN points to work with ICP **/
@@ -96,11 +98,6 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
         }
     }
 
-    if( saveSobel ) {
-//        pcl::io::savePCDFileASCII("sobTgt.pcd",tgtNonDense);
-//        pcl::io::savePCDFileASCII("sobSrc.pcd",srcNonDense);
-        saveSobel = false;
-    }
 
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());
@@ -109,7 +106,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     //use just optical flow transformation, without using ICP
     //finalTransf = oflowTransf;
     correspondences = customCorresp->getCorrespondences();
-    fitness = icp.getFitnessScore();
+    fitness = icp.getFitnessScore(); //segfault if you call this methoud without called icp.align first
 
     /** // SECOND ICP WITH ALL POINTS
 

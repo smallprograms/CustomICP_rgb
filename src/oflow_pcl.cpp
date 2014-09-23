@@ -174,6 +174,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
         }
     }
 
+    /** //Save optical flow images
     static int number=0;
     number++;
     std::stringstream str1;
@@ -190,6 +191,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     str3 << number;
     name = "oflow" + str3.str() + ".jpg";
     imwrite(name.c_str(),imgC);
+    **/
 
     /** calculate a median direction, conserve the three points closest to the median direction.
       this code must be rewrited, just for test **/

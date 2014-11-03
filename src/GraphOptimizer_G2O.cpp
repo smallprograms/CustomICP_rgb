@@ -8,37 +8,37 @@
 
 GraphOptimizer_G2O::GraphOptimizer_G2O()
 {
-  //  optimizer.setMethod(g2o::SparseOptimizer::LevenbergMarquardt);
-    optimizer.setVerbose(false);
-    // variable-size block solver
-    g2o::BlockSolverX::LinearSolverType * linearSolver = new g2o::LinearSolverDense<g2o::BlockSolverX::PoseMatrixType>();
-    g2o::BlockSolverX * solver_ptr = new g2o::BlockSolverX(linearSolver);
-    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
-    optimizer.setAlgorithm(solver);
 
-    //linearSolver = new g2o::LinearSolverCholmod<g2o::BlockSolverX::PoseMatrixType>();
-    //solver_ptr = new g2o::BlockSolverX(&optimizer,linearSolver);
-    //optimizer.setSolver(solver_ptr);
+    optimizer.setVerbose(true);
+    // variable-size block solver
+    /**/
+    g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+    g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+    g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+    solver->setWriteDebug(true);
+    optimizer.setAlgorithm(solver);
+    /**/
+
 
     //Set the vertex index to 0
     vertexIdx=0;
 }
 
-int GraphOptimizer_G2O::addVertex(Eigen::Matrix4f& vertexPose)
+int GraphOptimizer_G2O::addVertex(Eigen::Matrix4d& vertexPose)
 {
     static double yaw,pitch,roll;
 
-    #if ENABLE_DEBUG_G2O
-    char* fileName = (char*) malloc(100);
-    std::sprintf(fileName,"../results/matrices/pose_%i.txt",vertexIdx);
-    Miscellaneous::saveMatrix(vertexPose,fileName);
-    delete fileName;
-    #endif
+//    #if ENABLE_DEBUG_G2O
+////    char* fileName = (char*) malloc(100);
+////    std::sprintf(fileName,"../results/matrices/pose_%i.txt",vertexIdx);
+////    Miscellaneous::saveMatrix(vertexPose.cast<float>(),fileName);
+////    delete fileName;
+//    #endif
 
     //Transform Eigen::Matrix4f into 3D traslation and rotation for g2o
-    yaw = atan2f(vertexPose(1,0),vertexPose(0,0));
-    pitch = asinf(-vertexPose(2,0));
-    roll = atan2f(vertexPose(2,1),vertexPose(2,2));
+    yaw = atan2f((float)vertexPose(1,0),(float)vertexPose(0,0));
+    pitch = asinf(-(float)vertexPose(2,0));
+    roll = atan2f((float)vertexPose(2,1),(float)vertexPose(2,2));
 
     g2o::Vector3d t(vertexPose(0,3),vertexPose(1,3),vertexPose(2,3));
     g2o::Quaterniond q;
@@ -47,7 +47,7 @@ int GraphOptimizer_G2O::addVertex(Eigen::Matrix4f& vertexPose)
     q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
     q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
 
-    g2o::SE3Quat pose(q,t);	// vertex pose
+    //g2o::SE3Quat pose(q,t);	// vertex pose
 
     // set up node
     g2o::VertexSE3 *vc = new g2o::VertexSE3();
@@ -99,6 +99,14 @@ void GraphOptimizer_G2O::addEdge(const int fromIdx,
     q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
     q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
 
+    std::cout << "RELATIVE POSE:::: \n\n" << relativePose << "\n";
+
+    std::cout << "original quaternion:: " << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
+    g2o::Quaternionf q2;
+    Eigen::Matrix3f rot = relativePose.block(0,0,3,3);
+    q2 = rot;
+    std::cout << "new quaternion:: " << q2.x() << " " << q2.y() << " " << q2.z() << " " << q2.w() << "\n";
+
     g2o::SE3Quat transf(q,t);	// relative transformation
 
     g2o::EdgeSE3* edge = new g2o::EdgeSE3;
@@ -114,14 +122,17 @@ void GraphOptimizer_G2O::addEdge(const int fromIdx,
 
 void GraphOptimizer_G2O::optimizeGraph()
 {
+
     //Prepare and run the optimization
-    optimizer.initializeOptimization();
+    std::cout << "PREPARING OPT:: " << optimizer.initializeOptimization() << "\n";
 
     //Set the initial Levenberg-Marquardt lambda
     //optimizer.setUserLambdaInit(0.01);
     optimizer.setVerbose(true);
     //Run optimization
-    optimizer.optimize(10);
+    std::cout << "OPTIMIZE ITERATIONS::::: " << optimizer.optimize(10) << "\n";
+
+
 }
 
 void GraphOptimizer_G2O::getPoses(std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f > >& poses)
@@ -180,10 +191,17 @@ void GraphOptimizer_G2O::genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src
 {
     CustomICP icp;
     pcl::PointCloud<pcl::PointXYZRGB> notUsed(640,480);
+    icp.setOflowStop(true);
     icp.setInputSource(src);
     icp.setInputTarget(tgt);
     icp.align(notUsed);
     relPose = icp.getFinalTransformation();
-    infMatrix = Eigen::Matrix<double,6,6>::Identity();//*icp.getFitnessScore();
+    double fit = icp.getFitnessScore();
+    std::cout << "fit99999999999----: " << fit << "\n";
+    if( fit > 1 ) fit = 1;
+    fit = 1 - fit;
+    std::cout << "fit2: " << fit << "\n";
+    infMatrix = Eigen::Matrix<double,6,6>::Identity()*fit;
+
 }
 

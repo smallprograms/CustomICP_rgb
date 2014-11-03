@@ -3,12 +3,15 @@
 #include <cmath>
 #include "CustomICP.h"
 #include "GraphOptimizer_G2O.h"
+#include "BashUtils.h"
 
 //flag used to press a key to process next capture
 bool doNext = false;
 bool saveAndQuit = false;
 bool loadedGlobal = false;
 std::vector<Eigen::Matrix4f> poses;
+
+bool readCloud(int index, char* path, pcl::PointCloud<pcl::PointXYZRGB>& cloud);
 
 /** capture keyboard keyDown event **/
 void keyboardEventOccurred (const pcl::visualization::KeyboardEvent &event,
@@ -32,9 +35,17 @@ void writeTransformationQuaternion(Eigen::Matrix4f transf, std::string fileName)
     std::cout << transf.col(0)[0];
     Eigen::Matrix3f rot = transf.block(0,0,3,3);
     Eigen::Quaternionf quat(rot);
+    quat.normalize();
     std::ofstream file(fileName.c_str(), ios::out | ios::app);
     file << transf.col(3)[0] << " " << transf.col(3)[1] << " " << transf.col(3)[2] << " " << quat.x() << " " << quat.y() << " " << quat.z() << " " << quat.w() << "\n";
     file.close();
+}
+
+void reorthogonalizeMatrix(Eigen::Matrix4d& transf) {
+    Eigen::Matrix3d rot = transf.block(0,0,3,3);
+    Eigen::Quaterniond quat(rot);
+    quat.normalize();
+    transf.block(0,0,3,3) = quat.toRotationMatrix();
 }
 
 void writeTransformationMatrix(Eigen::Matrix4f transf, std::string fileName) {
@@ -135,6 +146,10 @@ void mergeClouds(pcl::PointCloud<pcl::PointXYZRGB>& globalCloud, const pcl::Poin
 
 void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int increment ) {
 
+    pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
+    //voxelFilter.setLeafSize(0.005,0.005,0.005);
+    voxelFilter.setLeafSize(0.01,0.01,0.01);
+
     std::string groundT(ground);
     std::ifstream groundFile(groundT.c_str());
     float tx,ty,tz;
@@ -147,28 +162,16 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
 
     //global cloud (to register aligned clouds)
     pcl::PointCloud<pcl::PointXYZRGB> globalCloud;
-    std::stringstream ss;
 
     int i = min;
-
-    //read first cloud (it has no transformation)
-    ss << path << "/cap" << i << ".pcd";
-    if( pcl::io::loadPCDFile<pcl::PointXYZRGB>(ss.str(), currCloud) == -1 ) {
-
-        std::cout << "Error Reading end at " << i << "\n";
-        return;
-
-    }
-
-    globalCloud = currCloud;
-
-    i++;
 
     //read file line by line (vec3 position and rotation quaternion)
     while( groundFile >> tx >> ty >> tz >> qx >> qy >> qz >> qw ) {
 
         //generate transformation matrix
         Eigen::Quaternion<float> quat (qw,qx,qy,qz);
+        std::cout << "creating quat(w,x,y,z):: " << qw << " " << qx << " " << qy << " " << qz << "\n";
+        std::cout << "readed quat:: (w,x,y,z)" << quat.w() << " " << quat.x() << " " << quat.y() << " " << quat.z() << "\n";
         Eigen::Matrix3f rot = quat.toRotationMatrix();
         transf = Eigen::Matrix4f::Identity();
         //transformation matrix containing only rotation
@@ -180,24 +183,24 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
         //substract identity because translation matrix vector has diagonal with ones
         transf = transf - Eigen::Matrix4f::Identity();
         transf(3,3) = 1;
-        ss.str(""); //reset string
-        ss << path << "/cap" << i << ".pcd";
-
-        std::cout <<  "reading " << ss.str() << "\n";
 
         //read current cloud from file
-        if( i > max || pcl::io::loadPCDFile<pcl::PointXYZRGB>(ss.str(), currCloud) == -1 ) {
+        if( i > max || readCloud(i,path,currCloud) == false ) {
 
             std::cout << "Reading end at " << i << "\n";
             break;
 
         }
-
+        std::cout << "READED:" << i << "\n";
         //apply transformation to cloud and add cloud to global cloud
         pcl::transformPointCloud(currCloud,finalCloud,transf);
         std::cout << "GLOBAL TRANSFORM:\n" << transf << "\n";
         //mergeClouds(globalCloud,finalCloud);
         globalCloud = globalCloud + finalCloud;
+//        std::cout << "global cloud size before voxel filter: " << globalCloud.size() << "\n";
+//        voxelFilter.setInputCloud(globalCloud.makeShared());
+//        voxelFilter.filter(globalCloud);
+//        std::cout << "global cloud size after voxel filter: " << globalCloud.size() << "\n";
         finalCloud.clear();
 
         i+=increment;
@@ -210,9 +213,11 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
 /** returns true if cloud was saved in cloud variable **/
 bool readCloud(int index, char* path, pcl::PointCloud<pcl::PointXYZRGB>& cloud) {
     //name of cloud file
-    std::stringstream ss;
-    ss << path << "/cap" << index << ".pcd";
-    if( pcl::io::loadPCDFile<pcl::PointXYZRGB>(ss.str(), cloud) == -1 ) {
+    std::string command("/home/not/code/computer_vision/PCL/customICP_rgb-build/freiburg1_desk/getPcdName.sh ");
+    command = command + boost::lexical_cast<std::string>(index);
+    std::string filePath=bash::exec( const_cast<char*>(command.c_str()) );
+    filePath.erase(std::remove(filePath.begin(), filePath.end(), '\n'), filePath.end());
+    if( pcl::io::loadPCDFile<pcl::PointXYZRGB>(filePath, cloud) == -1 ) {
 
         return false;
 
@@ -227,11 +232,11 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     CustomICP icp;
     pcl::FastBilateralFilter<pcl::PointXYZRGB> fastBilFilter;
     pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
-    voxelFilter.setLeafSize(0.0025,0.0025,0.0025);
+    voxelFilter.setLeafSize(0.01,0.01,0.01);
 
     pcl::console::setVerbosityLevel(pcl::console::L_DEBUG);
     //to accumulate ICP transformations
-    static Eigen::Matrix4f transf = Eigen::Matrix4f::Identity ();
+    static Eigen::Matrix4d transf = Eigen::Matrix4d::Identity ();
 
     //if loading a previous reconstruction, transf is not identity!
     if( loadedGlobal ) {
@@ -239,7 +244,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         std::string transfName(global);
         std::string prevTransfName(global);
         transfName += ".transf";
-        transf = loadTransformationMatrix(transfName);
+        transf = loadTransformationMatrix(transfName).cast<double>();
         prevTransfName += ".prevtransf";
         Eigen::Matrix4f prevTransf = Eigen::Matrix4f::Identity();
         prevTransf = loadTransformationMatrix(prevTransfName);
@@ -281,8 +286,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     GraphOptimizer_G2O optimizer;
     std::deque< pcl::PointCloud<pcl::PointXYZRGB> > cloudQueue;
     //cloudQueue.resize(4);
-     std::cout << "A\n";
-
     bool showCorrespondences = false;
     //in order execute algorithm just betwee two arbitrary clouds (user must give max < min)
     //just do one iteration from max to max!
@@ -290,11 +293,13 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         min = max -1;
         showCorrespondences = true;
     }
-    //read file by file
-    for(int i=min+1; i <= max; i++) {
 
-        //go ahead if user press n
-        if( /*doNext ||*/ true ) {
+    bool automatic=true;
+    //read file by file, save and quit if user press s
+    for(int i=min+1; i <= max && saveAndQuit == false; i++) {
+
+        //go ahead if user press n or is in automatic mode
+        if( doNext || automatic ) {
 
             doNext = false; 
             pcl::PointCloud<pcl::PointXYZRGB> currCloud(640,480);
@@ -305,6 +310,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 break;
             }
 
+            std::cout << "READED: " << i << "\n";
             /** end read next cloud **/
 
             /**
@@ -325,13 +331,24 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             pcl::copyPointCloud(currCloud,prevCloud);
 
             //update global transformation
-            transf = icp.getFinalTransformation() * transf;
+            Eigen::Matrix4f icpTransf = icp.getFinalTransformation();
+            //round to two decimals
+            icpTransf.col(3)[0] = roundf(icpTransf.col(3)[0]*100.0f)/100.0f;
+            icpTransf.col(3)[1] = roundf(icpTransf.col(3)[1]*100.0f)/100.0f;
+            icpTransf.col(3)[2] = roundf(icpTransf.col(3)[2]*100.0f)/100.0f;
 
+            transf = icpTransf.cast<double>() * transf;
+            //round to two decimals
+            transf.col(3)[0] = roundf(((float)transf.col(3)[0])*100.0f)/100.0f;
+            transf.col(3)[1] = roundf(((float)transf.col(3)[1])*100.0f)/100.0f;
+            transf.col(3)[2] = roundf(((float)transf.col(3)[2])*100.0f)/100.0f;
+
+            reorthogonalizeMatrix(transf);
             //std::cout << "Fitness: " << icp.getFitnessScore() << " - Correspondences: " <<  icp.getCorrespondences().size() << "\n";
 
             /**/
             int vertexID = optimizer.addVertex(transf);
-            poses.push_back(transf);
+            poses.push_back(transf.cast<float>());
 
             if( vertexID > 0 ) {
                 int fromIndex=vertexID-1;
@@ -344,10 +361,10 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
 
                     //optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
-                    optimizer.genEdgeData(currCloud.makeShared(),iter->makeShared(),*relPose,*infMatrix);
+                    optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
                     if( *relPose != Eigen::Matrix4f::Identity() ) {
                         std::cout << "ADDING EDGE " << fromIndex << " - " << vertexID << "\n";
-                        optimizer.addEdge(fromIndex,vertexID,*relPose,*infMatrix);
+                        optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
 
                     }
 
@@ -355,21 +372,21 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 }
 
                 for(int k=0; k < (poses.size()); k++) {
-                    std::cout << "distance :: " << k << " --- " << matrixDistance(poses.at(k),transf) << "\n";
+                    std::cout << "distance :: " << k << " --- " << matrixDistance(poses.at(k).cast<float>(),transf.cast<float>()) << "\n";
                 }
             }
 
             //add cloud to queue
             cloudQueue.push_back(currCloud);
-            const int QSIZE=3;
+            const int QSIZE=5;
             //mantain a constant size
             if ( cloudQueue.size() >= QSIZE ) {
                 cloudQueue.pop_front();
             }
             /**/
             //writeTransformation(icp.getFinalTransformation(), std::string(outFile) + std::string(".movements"));
-            writeTransformationQuaternion(transf, std::string(outFile) + std::string(".movements"));
-            pcl::transformPointCloud(currCloud,finalCloud,transf);
+            writeTransformationQuaternion(transf.cast<float>(), std::string(outFile) + std::string(".movements"));
+            pcl::transformPointCloud(currCloud,finalCloud,transf.cast<float>());
             std::cout << "Global transformation \n" << transf << "\n";
 
             prevCloud.clear();
@@ -377,6 +394,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
             std::cout << "FINAL CLOUD SIZE:   " << finalCloud.size() << "\n\n";
             //mergeClouds(globalCloud,finalCloud);
+            globalCloud = globalCloud + finalCloud;
 
             std::cout << "GLOBAL CLOUD SIZE:   " << globalCloud.size() << "\n\n";
 
@@ -396,12 +414,20 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     viewer->addLine( icp.getSourceFiltered().points[corresp.index_query],icp.getTargetFiltered().points[corresp.index_match],rand_alnum_str(k+2) );
                 }
 
-            }
+            } else {
+                /** Apply Voxel Filter*
+                voxelFilter.setInputCloud(globalCloud.makeShared());
+                voxelFilter.filter(globalCloud);
+                /**/
+                viewer->removeAllPointClouds();
+//                viewer->addPointCloud(globalCloud.makeShared());
 
-            //viewer->addPointCloud(globalCloud.makeShared());
+
+            }
 
 
             if(saveAndQuit) {
+                std::cout << "breaking\n";
                 break;
             }
 
@@ -411,13 +437,14 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
                 viewer->spinOnce (100);
                 boost::this_thread::sleep (boost::posix_time::microseconds (100000));
-                if( doNext || saveAndQuit ) break;
+                if( doNext || saveAndQuit ) break; //quit from visualizer loop, go to for loop
 
             }
             //dont skip the current capture
             --i;
         }
     } //end for
+    std::cout << "out for\n\n";
 
     while( !viewer->wasStopped() ) {
 
@@ -438,7 +465,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     std::string prevTransfFile(outFile);
     prevTransfFile += ".prevtransf";
     writeTransformationMatrix(icp.getFinalTransformation(),prevTransfFile);
-    saveState(globalCloud,transf,outFile);
+    saveState(globalCloud,transf.cast<float>(),outFile);
     return;
 
 /*

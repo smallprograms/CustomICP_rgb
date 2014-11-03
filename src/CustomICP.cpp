@@ -4,14 +4,16 @@
 
 CustomICP::CustomICP()
 {
-    customCorresp = new CustomCorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float>;
-    icp.setCorrespondenceEstimation(
-    boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
+    //customCorresp = new CustomCorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float>;
+    //icp.setCorrespondenceEstimation(
+    //boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
+
     //icp.setMaxCorrespondenceDistance(0.003); //22 sept
-    icp.setMaxCorrespondenceDistance(0.025);
+    std::cout << "\tsetMaxCorrespondenceDistance(0.5) \n NO CUSTOM sobel01\n";
+    icp.setMaxCorrespondenceDistance(0.1);
     icp.setMaximumIterations (25);
     icp.setTransformationEpsilon(1e-8);
-    icp.setEuclideanFitnessEpsilon(1e-8);
+    icp.setEuclideanFitnessEpsilon(1e-4);
     icp.setUseReciprocalCorrespondences(false);
     prevTransf = Eigen::Matrix4f::Identity();
     finalTransf = Eigen::Matrix4f::Identity();
@@ -19,11 +21,11 @@ CustomICP::CustomICP()
     stopIfOflowFails = false;
     oflowFound = false;
 
-
 }
 
 
 void CustomICP::setInputSource( pcl::PointCloud<pcl::PointXYZRGB>::Ptr src ) {
+
     this->src = src;
 
 }
@@ -35,10 +37,12 @@ void CustomICP::setInputTarget( pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt ) {
 
 void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
 {
+    /**/
     //for max 3D distance of projected optical flow correspondences
     float maxCorrespDist = 0.05;
     //optical flow to calculate initial transformation
     oflowTransf = getOflow3Dtransf(src,tgt,maxCorrespDist);
+    /*
     //try to obtain optical flow relaxing parameters
     while( oflowTransf == Eigen::Matrix4f::Identity() && maxCorrespDist < 0.2 ) {
         maxCorrespDist = maxCorrespDist + 0.05;
@@ -52,7 +56,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
 
         oflowFound = false;
         //increment max correspondences distances
-        icp.setMaxCorrespondenceDistance(0.09);
+        icp.setMaxCorrespondenceDistance(0.15);
 
         if( stopIfOflowFails ) return;
 
@@ -64,7 +68,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
         std::cout << oflowTransf << "\n";
         oflowFound = true;
     }
-
+    /**/
     //oflowTransf = Eigen::Matrix4f::Identity();
     pcl::PointCloud<pcl::PointXYZRGB> sobTgt(640,480);
     pcl::PointCloud<pcl::PointXYZRGB> sobSrc(640,480);
@@ -87,28 +91,84 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     srcNonDense.clear();
 
     for(int k=0; k < sobTgt.size(); k++) {
-        if( std::isnan(sobTgt.points[k].x) == false ) {
+        if( std::isnan(sobTgt.points[k].x) == false && sobTgt.points[k].z > 0.01) {
             tgtNonDense.push_back(sobTgt.at(k));
         }
     }
 
     for(int k=0; k < sobSrc.size(); k++) {
-        if( std::isnan(sobSrc.points[k].x) == false ) {
+        if( std::isnan(sobSrc.points[k].x) == false && sobSrc.points[k].z > 0.01 ) {
             srcNonDense.push_back(sobSrc.at(k));
         }
     }
-
+    std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
 
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());
     icp.align(cloud,oflowTransf);
     finalTransf = icp.getFinalTransformation();
+
     //use just optical flow transformation, without using ICP
-    //finalTransf = oflowTransf;
-    correspondences = customCorresp->getCorrespondences();
+    /**
+    std::cout << "USING ONLY OFL00W \n";
+    finalTransf = oflowTransf;
+    /**/
+    //correspondences = customCorresp->getCorrespondences();
     fitness = icp.getFitnessScore(); //segfault if you call this methoud without called icp.align first
 
-    /** // SECOND ICP WITH ALL POINTS
+    /** SECOND ICP WITH DIFFERENT MAX DISTANCE*/
+//    icp.setMaxCorrespondenceDistance(0.015);
+//    icp.align(cloud, finalTransf);
+//    finalTransf = icp.getFinalTransformation();
+//    correspondences = customCorresp->getCorrespondences();
+
+//    icp.setMaxCorrespondenceDistance(0.0075);
+//    icp.align(cloud, finalTransf);
+//    finalTransf = icp.getFinalTransformation();
+//    correspondences = customCorresp->getCorrespondences();
+
+
+    /** SECOND ICP WITH POINTS DOWNSAMPLED
+    pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icpFull;
+    //icpFull.setMaxCorrespondenceDistance(0.025); //21 oct
+    icpFull.setMaxCorrespondenceDistance(0.1);
+    icpFull.setEuclideanFitnessEpsilon(1e-4);
+    icpFull.setMaximumIterations(10);
+    pcl::PointCloud<pcl::PointXYZRGB>  srcFull;
+    pcl::PointCloud<pcl::PointXYZRGB>  tgtFull;
+    pcl::PointCloud<pcl::PointXYZRGB>  srcDS;
+    pcl::PointCloud<pcl::PointXYZRGB>  tgtDS;
+
+    std::vector<int> indices;
+    pcl::removeNaNFromPointCloud(*tgt,tgtFull, indices);
+    pcl::removeNaNFromPointCloud(*src,srcFull, indices);
+    //Downsample
+    voxelFilter.setLeafSize(0.005,0.005,0.005);
+    voxelFilter.setInputCloud(tgtFull.makeShared());
+    voxelFilter.filter(tgtDS);
+    voxelFilter.setInputCloud(srcFull.makeShared());
+    voxelFilter.filter(srcDS);
+    std::cout << "ICP0.1 DOWNSAMPLED SIZE: " << tgtDS.size() << "\n";
+    //apply ICP to downsampled clouds
+    icpFull.setInputSource(srcDS.makeShared());
+    icpFull.setInputTarget(tgtDS.makeShared());
+    icpFull.align(cloud,finalTransf);
+    finalTransf = icpFull.getFinalTransformation();
+
+    //apply ICP to full clouds
+//    icpFull.setMaxCorrespondenceDistance(0.01);
+//    icpFull.setTransformationEpsilon(1e-4);
+//    icpFull.setInputSource(srcFull.makeShared());
+//    icpFull.setInputTarget(tgtFull.makeShared());
+//    icpFull.align(cloud,finalTransf);
+//    finalTransf = icpFull.getFinalTransformation();
+
+
+
+
+    /**/
+
+    /** // ICP with randomness
 
     float maxCorDist = 0.03;
     float maxFit = 0.01;
@@ -118,7 +178,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     correspondences = customCorresp->getCorrespondences();
     Eigen::Vector3f yawPitchRoll = Eigen::Vector3f(0.015,0.01,0.01);
     Eigen::Vector3f xyzMaxDist = Eigen::Vector3f(0.08,0.04,0.04);
-
+    std::cout << "CORRESPONDENCES BEFORE RANDOM:" << numCorresp << "\n";
     //bf and numCorresp are passed by reference, in order to save its values to the next call of randomICP!
     randomICP(yawPitchRoll,xyzMaxDist,maxCorDist,maxFit,maxIter,bf,numCorresp);
     prevTransf = finalTransf;
@@ -262,16 +322,16 @@ void CustomICP::randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDi
         icp.align(notUsed,finalTransf);
         std::cout << "nr iiter: " << iter << "\n";
         //save transformation if it has has a better fit (less distance between corresp) and more correspondences!
-        float corFact = (float)getCorrespondences().size()/(float)numCorresp;
-        if( corFact > 2 || corFact < 0.5 ) corFact = 1;
-        std::cout << "cf: " << corFact << "\n";
-        if( icp.getFitnessScore() < corFact*bestFit
+//        float corFact = (float)getCorrespondences().size()/(float)numCorresp;
+//        if( corFact > 2 || corFact < 0.5 ) corFact = 1;
+//        std::cout << "cf: " << corFact << "\n";
+        if( icp.getFitnessScore() < bestFit
                 &&  getCorrespondences().size() > numCorresp ) {
             bestFit = icp.getFitnessScore();
             numCorresp = getCorrespondences().size();
             bestTransf = icp.getFinalTransformation();
-            correspondences = customCorresp->getCorrespondences();
-            std::cout << "saving best FIT\n";
+            //correspondences = customCorresp->getCorrespondences();
+            std::cout << "\n\nsaving best FIT\n";
             std::cout << "Faf \n" << finalTransf << "\n";
             std::cout << "FITttt::: " << bestFit << "\n";
             std::cout << "numCorresp::: " << numCorresp << "\n";

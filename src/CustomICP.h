@@ -47,6 +47,10 @@ private:
     bool oflowFound;
     bool stopIfOflowFails;
     pcl::Correspondences correspondences;
+    pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
+    //voxelFilter.setLeafSize(0.005,0.005,0.005);
+
+
 };
 
 #endif // CUSTOMICP_H

@@ -198,8 +198,8 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
         //mergeClouds(globalCloud,finalCloud);
         globalCloud = globalCloud + finalCloud;
 //        std::cout << "global cloud size before voxel filter: " << globalCloud.size() << "\n";
-//        voxelFilter.setInputCloud(globalCloud.makeShared());
-//        voxelFilter.filter(globalCloud);
+        voxelFilter.setInputCloud(globalCloud.makeShared());
+        voxelFilter.filter(globalCloud);
 //        std::cout << "global cloud size after voxel filter: " << globalCloud.size() << "\n";
         finalCloud.clear();
 
@@ -394,7 +394,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
             std::cout << "FINAL CLOUD SIZE:   " << finalCloud.size() << "\n\n";
             //mergeClouds(globalCloud,finalCloud);
-            globalCloud = globalCloud + finalCloud;
+            //globalCloud = globalCloud + finalCloud;
 
             std::cout << "GLOBAL CLOUD SIZE:   " << globalCloud.size() << "\n\n";
 

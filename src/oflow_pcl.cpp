@@ -166,6 +166,15 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
 
             cv::Point p0( round( cornersA[i].x ), round( cornersA[i].y ) );
             cv::Point p1( round( cornersB[i].x ), round( cornersB[i].y ) );
+            if( p0.x > 639 ) p0.x = 639;
+            if( p0.y > 479 ) p0.y = 479;
+            if( p0.x < 0 )   p0.x = 0;
+            if( p0.y < 0 )   p0.y = 0;
+            if( p1.x > 639 ) p1.x = 639;
+            if( p1.y > 479 ) p1.y = 479;
+            if( p1.x < 0 )   p1.x = 0;
+            if( p1.y < 0 )   p1.y = 0;
+            //std::cout << p0.x << " " << p0.y << " p1: " << p1.x << " " << p1.y << "\n";
             if( pcl::isFinite((*cloudA)(p0.x,p0.y)) && pcl::isFinite((*cloudB)(p1.x,p1.y)) ) {
 
                 line( imgC, p0, p1, CV_RGB(255,255,255), 2 );

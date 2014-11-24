@@ -210,7 +210,7 @@ SobelFilter<PointT>::getImageBorders() {
 template <typename PointT> void
 SobelFilter<PointT>::applyFilter (PointCloud &output)
 {
-    std::cout << "Aplying sobel filter\n";
+    //std::cout << "Aplying sobel filter\n";
 
     // Check if sigma_s has been given by the user
 //    if (sigma_s_ == 0)
@@ -300,7 +300,7 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
         }
     }
     imwrite("SOBEL_IMAGE.jpg",imgBorder);
-    std::cout << "ssssssssssssssssssnum points passed SobeL less points: " << numPoints << "\n dsafasdf\n";
+    //std::cout << "ssssssssssssssssssnum points passed SobeL less points: " << numPoints << "\n dsafasdf\n";
 
     //reject far lines!
 //    const float MAX_Z_DIST=2.5;

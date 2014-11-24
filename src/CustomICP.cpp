@@ -9,9 +9,9 @@ CustomICP::CustomICP()
     //boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
 
     //icp.setMaxCorrespondenceDistance(0.003); //22 sept
-    std::cout << "\tsetMaxCorrespondenceDistance(0.5) \n NO CUSTOM sobel01\n";
-    icp.setMaxCorrespondenceDistance(0.1);
-    icp.setMaximumIterations (25);
+    //std::cout << "\tsetMaxCorrespondenceDistance(0.5) \n NO CUSTOM sobel01\n";
+    icp.setMaxCorrespondenceDistance(0.4);
+    icp.setMaximumIterations (100);
     icp.setTransformationEpsilon(1e-8);
     icp.setEuclideanFitnessEpsilon(1e-4);
     icp.setUseReciprocalCorrespondences(false);
@@ -101,7 +101,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
             srcNonDense.push_back(sobSrc.at(k));
         }
     }
-    std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
+    //std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
 
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());

@@ -99,13 +99,13 @@ void GraphOptimizer_G2O::addEdge(const int fromIdx,
     q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
     q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
 
-    std::cout << "RELATIVE POSE:::: \n\n" << relativePose << "\n";
+    //std::cout << "RELATIVE POSE:::: \n\n" << relativePose << "\n";
 
-    std::cout << "original quaternion:: " << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << "\n";
+
     g2o::Quaternionf q2;
     Eigen::Matrix3f rot = relativePose.block(0,0,3,3);
     q2 = rot;
-    std::cout << "new quaternion:: " << q2.x() << " " << q2.y() << " " << q2.z() << " " << q2.w() << "\n";
+
 
     g2o::SE3Quat transf(q,t);	// relative transformation
 
@@ -197,10 +197,10 @@ void GraphOptimizer_G2O::genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src
     icp.align(notUsed);
     relPose = icp.getFinalTransformation();
     double fit = icp.getFitnessScore();
-    std::cout << "fit99999999999----: " << fit << "\n";
+    //std::cout << "fit99999999999----: " << fit << "\n";
     if( fit > 1 ) fit = 1;
     fit = 1 - fit;
-    std::cout << "fit2: " << fit << "\n";
+    //std::cout << "fit2: " << fit << "\n";
     infMatrix = Eigen::Matrix<double,6,6>::Identity()*fit;
 
 }

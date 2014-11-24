@@ -199,7 +199,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
                     float dist = dir.x*dir.x + dir.y*dir.y + dir.z*dir.z;
                     dist = std::sqrt(dist);
                     if( dist > maxCorrespDist /** 20 sep: 0.05*/ ) {
-                        std::cout << "skiping correspondence in oflow, with dist:" << dist << "\n";
+                        //std::cout << "skiping correspondence in oflow, with dist:" << dist << "\n";
                         continue;
                     }
                     cornersCloudA.push_back( pointA );
@@ -269,8 +269,8 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     }
 
     for(int j=0; j < maxUsedCorners; j++) {
-        std::cout << "CA1: " << cornersCloudA[j] << "\n";
-        std::cout << "CB1: " << cornersCloudB[j] << "\n";
+       // std::cout << "CA1: " << cornersCloudA[j] << "\n";
+       // std::cout << "CB1: " << cornersCloudB[j] << "\n";
         float dist = cornersCloudA[j].x - cornersCloudB[j].x;
         dist = dist*dist;
         dist = dist + (cornersCloudA[j].y - cornersCloudB[j].y)*(cornersCloudA[j].y - cornersCloudB[j].y);
@@ -293,7 +293,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     }
     /**/
     pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ,float_t> tEst;
-    std::cout << "2244555oflow 3D points A: " << cornersCloudA.size() << " B: " << cornersCloudB.size() << "\n";
+    //std::cout << "2244555oflow 3D points A: " << cornersCloudA.size() << " B: " << cornersCloudB.size() << "\n";
     if(/*finalCornersA.size()*/ cornersCloudA.size() > 2) {
 
         //tEst.estimateRigidTransformation(finalCornersA,finalCornersB,corrVec,transfMat);

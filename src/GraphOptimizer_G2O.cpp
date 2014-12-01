@@ -12,10 +12,12 @@ GraphOptimizer_G2O::GraphOptimizer_G2O()
     optimizer.setVerbose(true);
     // variable-size block solver
     /**/
-    g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+    //g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+    g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverCholmod<g2o::BlockSolver_6_3::PoseMatrixType>();
     g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
     solver->setWriteDebug(true);
+    solver->setUserLambdaInit(0.01);
     optimizer.setAlgorithm(solver);
     /**/
 
@@ -128,9 +130,10 @@ void GraphOptimizer_G2O::optimizeGraph()
 
     //Set the initial Levenberg-Marquardt lambda
     //optimizer.setUserLambdaInit(0.01);
+
     optimizer.setVerbose(true);
     //Run optimization
-    std::cout << "OPTIMIZE ITERATIONS::::: " << optimizer.optimize(10) << "\n";
+    std::cout << "OPTIMIZE ITERATIONS::::: " << optimizer.optimize(100) << "\n";
 
 
 }

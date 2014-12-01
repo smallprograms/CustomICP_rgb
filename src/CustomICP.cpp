@@ -79,6 +79,11 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     sobFilter.setInputCloud(src);
     sobFilter.applyFilter(sobSrc);
 
+    std::cout << "asdfasf 1123\n";
+    sobFilter.setSourceCloud(src);
+    sobFilter.setTargetCloud(tgt);
+    sobFilter.applyFilter(sobSrc,sobTgt);
+
     static bool saveSobel=true;
     if( saveSobel ) {
         pcl::io::savePCDFileASCII("sobTgtBef.pcd",sobTgt);
@@ -156,12 +161,13 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     finalTransf = icpFull.getFinalTransformation();
 
     //apply ICP to full clouds
-//    icpFull.setMaxCorrespondenceDistance(0.01);
-//    icpFull.setTransformationEpsilon(1e-4);
-//    icpFull.setInputSource(srcFull.makeShared());
-//    icpFull.setInputTarget(tgtFull.makeShared());
-//    icpFull.align(cloud,finalTransf);
-//    finalTransf = icpFull.getFinalTransformation();
+    icpFull.setMaxCorrespondenceDistance(0.05);
+    icpFull.setMaximumIterations(10);
+    icpFull.setTransformationEpsilon(1e-4);
+    icpFull.setInputSource(srcFull.makeShared());
+    icpFull.setInputTarget(tgtFull.makeShared());
+    icpFull.align(cloud,finalTransf);
+    finalTransf = icpFull.getFinalTransformation();
 
 
 
@@ -170,11 +176,12 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
 
     /** // ICP with randomness
 
-    float maxCorDist = 0.03;
+    float maxCorDist = 0.4;
     float maxFit = 0.01;
     int maxIter = 20;
     float bf = icp.getFitnessScore();
-    int numCorresp = getCorrespondences().size();
+    int numCorresp = icp.correspondences_->size();
+
     correspondences = customCorresp->getCorrespondences();
     Eigen::Vector3f yawPitchRoll = Eigen::Vector3f(0.015,0.01,0.01);
     Eigen::Vector3f xyzMaxDist = Eigen::Vector3f(0.08,0.04,0.04);
@@ -239,7 +246,7 @@ void CustomICP::randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDi
     int iter=0;
     pcl::PointCloud<pcl::PointXYZRGB> notUsed(640,480);
 
-    Eigen::Vector3f step = maxDist/12.0f;
+    Eigen::Vector3f step = maxDist/4;
     Eigen::Vector3f offset = -maxDist;
 
     float shift = -maxCorDist;
@@ -292,7 +299,7 @@ void CustomICP::randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDi
 //        //z axis random move
 //        randNum = 2*(0.5- ((float)rand())/RAND_MAX)*maxDist(2);
 //        finalTransf(2,3) = finalTransf(2,3) + randNum;
-//        std::cout << "z move: " << finalTransf(2,3) << "\n";
+////        std::cout << "z move: " << finalTransf(2,3) << "\n";
 
 
 
@@ -321,14 +328,15 @@ void CustomICP::randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDi
 
         icp.align(notUsed,finalTransf);
         std::cout << "nr iiter: " << iter << "\n";
+        std::cout << "corr: " << icp.correspondences_->size() << "\n";
         //save transformation if it has has a better fit (less distance between corresp) and more correspondences!
 //        float corFact = (float)getCorrespondences().size()/(float)numCorresp;
 //        if( corFact > 2 || corFact < 0.5 ) corFact = 1;
 //        std::cout << "cf: " << corFact << "\n";
         if( icp.getFitnessScore() < bestFit
-                &&  getCorrespondences().size() > numCorresp ) {
+                &&  icp.correspondences_->size() > numCorresp ) {
             bestFit = icp.getFitnessScore();
-            numCorresp = getCorrespondences().size();
+            numCorresp = icp.correspondences_->size() ;
             bestTransf = icp.getFinalTransformation();
             //correspondences = customCorresp->getCorrespondences();
             std::cout << "\n\nsaving best FIT\n";

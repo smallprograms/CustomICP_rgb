@@ -40,7 +40,10 @@
 
 #include <pcl/filters/filter.h>
 #include <pcl/search/pcl_search.h>
+#include <vector>
 #include "opencv2/opencv.hpp"
+#include "opencv2/flann/flann.hpp"
+#include "opencv2/flann/flann_base.hpp"
 #include "oflow_pcl.h"
 
 #define MIN3(x,y,z)  ((y) <= (z) ? \
@@ -54,6 +57,70 @@
     ((x) >= (z) ? (x) : (z)))
 
 
+inline float flann_knn(cv::Mat& m_destinations, cv::Mat& m_object, std::vector<int>& ptpairs, std::vector<float>& dists) {
+    using namespace cv;
+    // find nearest neighbors using FLANN
+    cv::Mat m_indices(m_object.rows, 1, CV_32S);
+    cv::Mat m_dists(m_object.rows, 1, CV_32F);
+
+    Mat dest_32f; m_destinations.convertTo(dest_32f,CV_32FC2);
+    Mat obj_32f; m_object.convertTo(obj_32f,CV_32FC2);
+
+    assert(dest_32f.type() == CV_32F);
+
+    cv::flann::Index flann_index(dest_32f, cv::flann::KDTreeIndexParams(2));  // using 2 randomized kdtrees
+    flann_index.knnSearch(obj_32f, m_indices, m_dists, 1, cv::flann::SearchParams(64) );
+
+    int* indices_ptr = m_indices.ptr<int>(0);
+    //float* dists_ptr = m_dists.ptr<float>(0);
+    for (int i=0;i<m_indices.rows;++i) {
+        ptpairs.push_back(indices_ptr[i]);
+    }
+
+    dists.resize(m_dists.rows);
+    m_dists.copyTo(Mat(dists));
+
+    return cv::sum(m_dists)[0]/m_dists.rows;
+}
+
+inline void findTransformSVD(cv::Mat& _m, cv::Mat& _d, cv::Mat& outR, cv::Scalar& outT) {
+    using namespace cv;
+    Mat m; _m.convertTo(m,CV_32F);
+    Mat d; _d.convertTo(d,CV_32F);
+
+    Scalar d_bar = mean(_d);
+    Scalar m_bar = mean(_m);
+    std::cout << "dbarrrrr" << d_bar << "\n";
+    std::cout << "mbar" << m_bar << "\n";
+    Mat mc = m - m_bar;
+    Mat dc = d - d_bar;
+
+    mc = mc.reshape(1); dc = dc.reshape(1);
+
+    Mat H(2,2,CV_32FC1);
+    for(int i=0;i<mc.rows;i++) {
+        Mat mci = mc(Range(i,i+1),Range(0,2));
+        Mat dci = dc(Range(i,i+1),Range(0,2));
+        H = H + mci.t() * dci;
+    }
+
+    cv::SVD svd(H);
+
+    Mat R = svd.vt.t() * svd.u.t();
+    double det_R = cv::determinant(R);
+    std::cout << "detR" << det_R << "\n";
+    if(abs(det_R + 1.0) < 0.0001) {
+        float _tmp[4] = {1,0,0,cv::determinant(svd.vt*svd.u)};
+        R = svd.u * Mat(2,2,CV_32FC1,_tmp) * svd.vt;
+    }
+
+    float* _R = R.ptr<float>(0);
+    Scalar T(d_bar[0] - (m_bar[0]*_R[0] + m_bar[1]*_R[1]),d_bar[1] - (m_bar[0]*_R[2] + m_bar[1]*_R[3]));
+
+    outR = R;
+    outT = T;
+
+}
 
 /** \brief A bilateral filter implementation for point cloud data. Uses the intensity data channel.
     * \note For more information please see
@@ -89,6 +156,12 @@ public:
     */
     void
     applyFilter (PointCloud &output);
+    cv::Mat getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
+    cv::Mat getPoints(cv::Mat bordersImage);
+    void setCloudAsNaN(pcl::PointCloud<pcl::PointXYZRGB> &cloud);
+    void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
+    void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
+    void applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered);
 
     /** \brief Compute the intensity average for a single point
     * \param[in] pid the point index to compute the weight for
@@ -147,7 +220,8 @@ public:
     }
 
 private:
-
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr sourceCloud;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr targetCloud;
     /** \brief The bilateral filter Gaussian distance kernel.
     * \param[in] x the spatial distance (distance or intensity)
     * \param[in] sigma standard deviation
@@ -158,7 +232,7 @@ private:
         return (exp (- (x*x)/(2*sigma*sigma)));
     }
 
-    cv::Mat getImageBorders();
+    cv::Mat getImageBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr);
 
     /** \brief The half size of the Gaussian bilateral filter window (e.g., spatial extents in Euclidean). */
     double sigma_s_;
@@ -173,10 +247,10 @@ private:
 };
 
 template <typename PointT> cv::Mat
-SobelFilter<PointT>::getImageBorders() {
+SobelFilter<PointT>::getImageBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud) {
 
     cv::Mat imgColor(480,640,CV_8UC3);
-    cloudToMat(input_->makeShared(),imgColor);
+    cloudToMat(cloud->makeShared(),imgColor);
 
     cv::Mat imgGray(480,640,CV_8UC1);
     cv::cvtColor(imgColor,imgGray,CV_BGR2GRAY);
@@ -241,7 +315,8 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
 
     int numPoints=0;
     cv::Mat imgBorder = cv::Mat::zeros(480,640,CV_8UC1);
-    cv::Mat rgbBorder = getImageBorders();
+    return;
+    cv::Mat rgbBorder;;// = getImageBorders(input_);
 
     for(size_t m=win_width/2+1; m < (input_->width-win_width/2-1); m++) {
         for(size_t n=win_height/2+1; n < (input_->height-win_height/2-1); n++) {
@@ -299,7 +374,12 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
             }
         }
     }
-    imwrite("SOBEL_IMAGE.jpg",imgBorder);
+    static std::string id("a");
+    std::string name=std::string("sobel_img")+id+std::string(".jpg");
+    imwrite(name.c_str(),imgBorder);
+    if( id=="a") id="b";
+    else if( id=="b") id="a";
+
     //std::cout << "ssssssssssssssssssnum points passed SobeL less points: " << numPoints << "\n dsafasdf\n";
 
     //reject far lines!
@@ -314,5 +394,149 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
 //        }
 //    }
 
+}
+template <typename PointT>
+cv::Mat SobelFilter<PointT>::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& bordersImage)
+{
+    int numPoints=0;
+    cv::Mat imgBorder = cv::Mat::zeros(480,640,CV_8UC1);
+    cv::Mat rgbBorder = getImageBorders(bordersImage);
+
+    for(size_t m=win_width/2+1; m < (input_->width-win_width/2-1); m++) {
+        for(size_t n=win_height/2+1; n < (input_->height-win_height/2-1); n++) {
+
+
+            size_t j_min = n-win_width/2;
+            size_t j_max = n + win_width/2;
+            size_t i_min = m-win_height/2;
+            size_t i_max = m + win_height/2;
+
+            if( pcl::isFinite(bordersImage->at(i_min,j_min)) && pcl::isFinite(bordersImage->at(i_max,j_min)) && pcl::isFinite(bordersImage->at(m,j_min)) &&
+                    pcl::isFinite(bordersImage->at(m,j_max))
+                    && pcl::isFinite(bordersImage->at(i_min,j_max)) && pcl::isFinite(bordersImage->at(i_max,j_max)) && pcl::isFinite(bordersImage->at(i_max,n))
+                    && pcl::isFinite(bordersImage->at(i_min,n)) /*
+                    && cloud->at(i_min,j_min).z != 0 && cloud->at(i_max,j_min).z != 0 && cloud->at(m,j_min).z != 0
+                    && cloud->at(m,j_max).z != 0 && cloud->at(i_min,j_max).z !=0 && cloud->at(i_max,j_max).z != 0 &&
+                    cloud->at(i_max,n).z != 0 && cloud->at(i_min,n).z != 0 */) {
+
+
+                //horizontal diff mask
+                float distH = std::abs(bordersImage->at(i_min,j_min).z - bordersImage->at(i_min,j_max).z);
+                distH += 2*std::abs(bordersImage->at(m,j_min).z - bordersImage->at(m,j_max).z);
+                distH += std::abs(bordersImage->at(i_max,j_min).z - bordersImage->at(i_max,j_max).z);
+
+                //std::cout <<cloud->at(i_min,j_min).z << "\n";
+
+                //vertical diff mask
+                float distV = std::abs(bordersImage->at(i_min,j_min).z - bordersImage->at(i_max,j_min).z);
+                distV += 2*std::abs(bordersImage->at(i_min,n).z - bordersImage->at(i_max,n).z);
+                distV += std::abs(bordersImage->at(i_min,j_max).z - bordersImage->at(i_max,j_max).z);
+
+                float distG = std::sqrt( distH*distH + distV*distV );
+
+                //const float thresh = 0.1;
+                const float thresh = 0.2;
+
+                if( rgbBorder.at<uchar>(n,m) > 150 ) {
+
+                    imgBorder.at<uchar>(n,m) = 255;
+
+                }
+
+            }
+        }
+    }
+
+    return imgBorder;
+}
+
+template <typename PointT>
+cv::Mat SobelFilter<PointT>::getPoints(cv::Mat bordersImage)
+{
+    std::cout << "GETPPPPasdfasfaf2313\n\n";
+    cv::Point2i point;
+
+
+    int numPoints=0;
+    for(int y=0; y < bordersImage.rows; y++) {
+        for(int x=0; x < bordersImage.cols; x++ ) {
+            if( bordersImage.at<uchar>(y,x) > 0 ) {
+                numPoints++;
+            }
+        }
+    }
+    int num=0;
+    cv::Mat pointMat(numPoints,2,CV_32SC1);
+    for(int y=0; y < bordersImage.rows; y++) {
+        for(int x=0; x < bordersImage.cols; x++ ) {
+            if( bordersImage.at<uchar>(y,x) > 0 ) {
+                pointMat.at<int32_t>(num,0) = x;
+                pointMat.at<int32_t>(num,1) = y;
+                num++;
+            }
+        }
+    }
+
+    return pointMat;
+}
+
+template <typename PointT>
+void SobelFilter<PointT>::setCloudAsNaN(pcl::PointCloud<pcl::PointXYZRGB> &cloud)
+{
+    for( size_t m=0; m < cloud.width;m++ ) {
+        for( size_t n=0; n < cloud.height; n++) {
+            cloud(m,n).x=cloud(m,n).y=cloud(m,n).z = std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+}
+
+template <typename PointT> void
+SobelFilter<PointT>::setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source)
+{
+    sourceCloud = source;
+}
+
+template <typename PointT> void
+SobelFilter<PointT>::setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target)
+{
+    targetCloud = target;
+}
+
+template <typename PointT> void
+SobelFilter<PointT>::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered, pcl::PointCloud<pcl::PointXYZRGB>&targetFiltered)
+{
+    setCloudAsNaN(sourceFiltered);
+    setCloudAsNaN(targetFiltered);
+    cv::Mat sourceBorders = getBorders(sourceCloud);
+    cv::Mat targetBorders = getBorders(targetCloud);
+    std::vector<int> pairs;
+    std::vector<float> dists;
+
+    cv::Mat sourcePoints = getPoints(sourceBorders);
+    cv::Mat targetPoints = getPoints(targetBorders);
+
+    int dist = flann_knn(sourcePoints,targetPoints,pairs,dists);
+    cv::Mat corresp(targetPoints.size(),targetPoints.type());
+    for(int i=0;i<targetPoints.rows;i++) {
+        cv::Point p = sourcePoints.at<cv::Point>(pairs[i],0);
+        corresp.at<cv::Point>(i,0) = p;
+
+    }
+    cv::Mat R;
+    cv::Scalar T;
+    findTransformSVD(targetPoints,corresp,R,T);
+    std::cout << R << "\n";
+    std::cout << T << "\n";
+    std::cout << "DISTdffANCE 2D::: " << dist << "\n";
+    std::cout << "adfasdf APPP FILTER\n\n\n\n\n" << sourcePoints.size() << "\n";
+//    for(int k=0; k < dists.size(); k++ ) {
+//        std::cout << "ddddddD: " << dists[k] << "\n";
+//    }
+    std::cout << "adf APPP FILTER\n\n\n\n\n" << sourcePoints.size() << "\n";
+//    static std::string id("a");
+//    std::string name=std::string("sobel_img")+id+std::string(".jpg");
+//    imwrite(name.c_str(),imgBorder);
+//    if( id=="a") id="b";
+//    else if( id=="b") id="a";
 }
 #endif // PCL_FILTERS_BILATERAL_H_

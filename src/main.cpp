@@ -15,11 +15,14 @@ bool saveAndQuit = false;
 bool loadedGlobal = false;
 std::vector<Eigen::Matrix4f> poses;
 
+std::map<int,std::vector<cv::KeyPoint> > cloudKeyPoints;
+std::map<int,cv::Mat>  cloudDescriptors;
+
 bool readCloud(int index, char* path, pcl::PointCloud<pcl::PointXYZRGB>& cloud);
 
 /** capture keyboard keyDown event **/
 void keyboardEventOccurred (const pcl::visualization::KeyboardEvent &event,
-        void *not_used)
+                            void *not_used)
 {
     
     if (event.getKeySym () == "n" && event.keyDown ())
@@ -45,6 +48,119 @@ void writeTransformationQuaternion(Eigen::Matrix4f transf, std::string fileName)
     file.close();
 }
 
+void writeNumber(float number, std::string fileName) {
+
+    std::ofstream file(fileName.c_str(), ios::out | ios::app);
+    file << number << "\n";
+    file.close();
+}
+
+void writeTwoNumbers(int fromIndex, int toIndex , std::string fileName) {
+
+    std::ofstream file(fileName.c_str(), ios::out | ios::app);
+    file << fromIndex << " " << toIndex << "\n";
+    file.close();
+}
+
+void writeEdge(const int fromIndex,const int toIndex,Eigen::Matrix4f& relativePose, Eigen::Matrix<double,6,6>& informationMatrix, std::string fileNamePrefix) {
+
+    writeTwoNumbers(fromIndex, toIndex, fileNamePrefix + ".from_to.txt");
+    writeTransformationQuaternion(relativePose,fileNamePrefix + ".relativeTransf.txt");
+    writeNumber(informationMatrix.col(0)[0],fileNamePrefix + ".fitness.txt");
+
+}
+
+Eigen::Matrix4f quaternionToMatrix(float tx, float ty, float tz, float qx, float qy, float qz, float qw ) {
+
+    Eigen::Matrix4f transf = Eigen::Matrix4f::Identity();
+
+    //check if quaternion is identity
+    if( (tx==0 && ty==0 && tz==0 && qx==0 && qy==0 && qz == 0) == false ) {
+        //generate transformation matrix
+        Eigen::Quaternion<float> quat (qw,qx,qy,qz);
+        std::cout << "creating quat(w,x,y,z):: " << qw << " " << qx << " " << qy << " " << qz << "\n";
+        std::cout << "readed quat:: (w,x,y,z)" << quat.w() << " " << quat.x() << " " << quat.y() << " " << quat.z() << "\n";
+        Eigen::Matrix3f rot = quat.toRotationMatrix();
+
+        //transformation matrix containing only rotation
+        transf << rot(0,0),rot(0,1),rot(0,2),0,rot(1,0),rot(1,1),rot(1,2),0,rot(2,0),rot(2,1),rot(2,2),0,0,0,0,1;
+        //translation vector
+        Eigen::Vector3f v(tx,ty,tz);
+        //update transf. matrix with translation vector
+        transf = transf + Eigen::Affine3f(Eigen::Translation3f(v)).matrix();
+        //substract identity because translation matrix vector has diagonal with ones
+        transf = transf - Eigen::Matrix4f::Identity();
+        transf(3,3) = 1;
+    }
+
+    return transf;
+}
+
+//read edges and poses of the graph
+bool readAndOptimizeGraph(std::string fileNamePrefix, std::string outFile) {
+
+    GraphOptimizer_G2O optimizer;
+    std::string posesFileName = fileNamePrefix + ".movements";
+
+    std::ifstream groundFile(posesFileName.c_str());
+
+    float tx,ty,tz;
+    float qw,qx,qy,qz;
+    Eigen::Matrix4f transf;
+    Eigen::Matrix4d transfD;
+
+    //read file line by line (vec3 position and rotation quaternion)
+    while( groundFile >> tx >> ty >> tz >> qx >> qy >> qz >> qw ) {
+
+        transf = quaternionToMatrix(tx,ty,tz,qx,qy,qz,qw);
+        transfD = transf.cast<double>();
+        optimizer.addVertex(transfD);
+    }
+
+    //the three files should have the same amount of lines, an edge is formed reading one line from each file
+    //from index, to index
+    std::string edges = fileNamePrefix + ".from_to.txt";
+    std::ifstream edgesFile(edges.c_str());
+    //relative transformation between from and to position
+    std::string relativeTransfs = fileNamePrefix + ".relativeTransf.txt";
+    std::ifstream relativeTransfsFile(relativeTransfs.c_str());
+    //fitness score of the relative transformation
+    std::string fitness = fileNamePrefix + ".fitness.txt";
+    std::ifstream fitnessFile(fitness.c_str());
+
+    int from,to;
+    float fitnessVal;
+
+    while( edgesFile >> from >> to ) {
+
+        if ( relativeTransfsFile >> tx >> ty >> tz >> qx >> qy >> qz >> qw ) {
+            transf = quaternionToMatrix(tx,ty,tz,qx,qy,qz,qw);
+        } else {
+            return false; //files entries doesnt match!
+        }
+
+        if( fitnessFile >> fitnessVal ) {
+            Eigen::Matrix<double,6,6> infoMat = Eigen::Matrix<double,6,6>::Identity()*fitnessVal;
+            //add readed edge to optimizer
+            optimizer.addEdge(from,to,transf,infoMat);
+        } else {
+            return false; //files entries doesnt match!
+        }
+    }
+
+    //run optimization on the graph
+    optimizer.optimizeGraph();
+    std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >  poses;
+    optimizer.getPoses(poses);
+
+    //write new poses (optimized)
+    for( std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >::iterator iter = poses.begin(); iter != poses.end(); iter++ ) {
+        writeTransformationQuaternion(*iter,std::string(outFile));
+    }
+
+    return true;
+}
+
 void reorthogonalizeMatrix(Eigen::Matrix4d& transf) {
     Eigen::Matrix3d rot = transf.block(0,0,3,3);
     Eigen::Quaterniond quat(rot);
@@ -62,6 +178,8 @@ void writeTransformationMatrix(Eigen::Matrix4f transf, std::string fileName) {
     ofs.close();
 }
 
+
+
 float matrixDistance(Eigen::Matrix4f transf1,Eigen::Matrix4f transf2) {
     //euclidean distance between poses
     float dist = (transf1.col(3)[0] - transf2.col(3)[0])*(transf1.col(3)[0] - transf2.col(3)[0]);
@@ -70,6 +188,7 @@ float matrixDistance(Eigen::Matrix4f transf1,Eigen::Matrix4f transf2) {
     dist = std::sqrt(dist);
     return dist;
 }
+
 
 Eigen::Matrix4f loadTransformationMatrix(std::string fileName) {
 
@@ -172,28 +291,7 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
     //read file line by line (vec3 position and rotation quaternion)
     while( groundFile >> tx >> ty >> tz >> qx >> qy >> qz >> qw ) {
 
-        transf = Eigen::Matrix4f::Identity();
-
-        //check if quaternion is identity
-        if( (tx==0 && ty==0 && tz==0 && qx==0 && qy==0 && qz == 0) == false ) {
-            //generate transformation matrix
-            Eigen::Quaternion<float> quat (qw,qx,qy,qz);
-            std::cout << "creating quat(w,x,y,z):: " << qw << " " << qx << " " << qy << " " << qz << "\n";
-            std::cout << "readed quat:: (w,x,y,z)" << quat.w() << " " << quat.x() << " " << quat.y() << " " << quat.z() << "\n";
-            Eigen::Matrix3f rot = quat.toRotationMatrix();
-
-            //transformation matrix containing only rotation
-            transf << rot(0,0),rot(0,1),rot(0,2),0,rot(1,0),rot(1,1),rot(1,2),0,rot(2,0),rot(2,1),rot(2,2),0,0,0,0,1;
-            //translation vector
-            Eigen::Vector3f v(tx,ty,tz);
-            //update transf. matrix with translation vector
-            transf = transf + Eigen::Affine3f(Eigen::Translation3f(v)).matrix();
-            //substract identity because translation matrix vector has diagonal with ones
-            transf = transf - Eigen::Matrix4f::Identity();
-            transf(3,3) = 1;
-        } else {
-            std::cout << "READED IDENTITY QUAT\n\n\n";
-        }
+        transf = quaternionToMatrix(tx,ty,tz,qx,qy,qz,qw);
 
         //read current cloud from file
         if( i > max || readCloud(i,path,currCloud) == false ) {
@@ -208,10 +306,10 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
         std::cout << "GLOBAL TRANSFORM:\n" << transf << "\n";
         //mergeClouds(globalCloud,finalCloud);
         globalCloud = globalCloud + finalCloud;
-//        std::cout << "global cloud size before voxel filter: " << globalCloud.size() << "\n";
+        //        std::cout << "global cloud size before voxel filter: " << globalCloud.size() << "\n";
         voxelFilter.setInputCloud(globalCloud.makeShared());
         voxelFilter.filter(globalCloud);
-//        std::cout << "global cloud size after voxel filter: " << globalCloud.size() << "\n";
+        //        std::cout << "global cloud size after voxel filter: " << globalCloud.size() << "\n";
         finalCloud.clear();
 
         i+=increment;
@@ -248,81 +346,48 @@ bool saveCloudImage(const pcl::PointCloud<pcl::PointXYZRGB>& cloud, std::string 
 
 }
 
-/** uses SURF for comparison of two clouds, saves the feature distance in featureDist parameter and detected points pixel distance in pixelDist paramter **/
-void visualDistance( const pcl::PointCloud<pcl::PointXYZRGB>& cloudA, const pcl::PointCloud<pcl::PointXYZRGB>& cloudB, float& featureDist, int& pixelDist ) {
-
+/** save keypoints and descriptors of each cloud in two std::maps */
+void saveCloudDescriptors(int cloudIndex, const pcl::PointCloud<pcl::PointXYZRGB>& cloudA) {
 
     using namespace cv;
     cv::Mat imgAcolor(480,640,CV_8UC3);
     cloudToMat(cloudA.makeShared(),imgAcolor);
-    cv::Mat imgBcolor(480,640,CV_8UC3);
-    cloudToMat(cloudB.makeShared(),imgBcolor);
-
-    /**
-    //histogram comparison
-    cv::Mat imgHSVA;
-    cv::Mat imgHSVB;
-    cv::MatND histA;
-    cv::MatND histB;
-    cv::cvtColor( imgAcolor, imgHSVA, cv::COLOR_BGR2HSV );
-    cv::cvtColor( imgBcolor, imgHSVB, cv::COLOR_BGR2HSV );
-
-
-    /// Using 50 bins for hue and 60 for saturation
-    int h_bins = 50; int s_bins = 60;
-    int histSize[] = { h_bins, s_bins };
-
-    // hue varies from 0 to 179, saturation from 0 to 255
-    float h_ranges[] = { 0, 180 };
-    float s_ranges[] = { 0, 256 };
-
-    const float* ranges[] = { h_ranges, s_ranges };
-
-    // Use the o-th and 1-st channels
-    int channels[] = { 0, 1 };
-
-    cv::calcHist( &imgHSVA, 1, channels, Mat(), histA, 2, histSize, ranges, true, false );
-    cv::normalize( histA, histA, 0, 1, cv::NORM_MINMAX, -1, Mat() );
-
-    cv::calcHist( &imgHSVB, 1, channels, Mat(), histB, 2, histSize, ranges, true, false );
-    cv::normalize( histB, histB, 0, 1, cv::NORM_MINMAX, -1, Mat() );
-
-    double hist_dif = cv::compareHist( histA, histB, CV_COMP_CORREL );
-
-    std::cout << "HIST DIF::::::: " << hist_dif << "\n";
-
-    */
-    //SURF comparison
 
     cv::Mat img_1(480,640,CV_8UC1);
-    cv::Mat img_2(480,640,CV_8UC1);
-
     cv::cvtColor(imgAcolor,img_1,CV_BGR2GRAY);
-    cv::cvtColor(imgBcolor,img_2,CV_BGR2GRAY);
-
-    if( !img_1.data || !img_2.data )
-    { std::cout<< " --(!) Error reading images " << std::endl;  }
 
     //-- Step 1: Detect the keypoints using SURF Detector
     int minHessian = 400;
 
-    using namespace cv;
     SurfFeatureDetector detector( minHessian );
     detector.upright = true;
 
 
-    std::vector<KeyPoint> keypoints_1, keypoints_2;
-
+    std::vector<KeyPoint> keypoints_1;
     detector.detect( img_1, keypoints_1 );
-    detector.detect( img_2, keypoints_2 );
+
+    cloudKeyPoints[cloudIndex] = keypoints_1;
 
     //-- Step 2: Calculate descriptors (feature vectors)
     SurfDescriptorExtractor extractor;
+    Mat descriptors_1;
+    extractor.compute( img_1, keypoints_1, descriptors_1 );
+
+    cloudDescriptors[cloudIndex] = descriptors_1;
+}
+
+/** uses SURF for comparison of two clouds, saves the feature distance in featureDist parameter and detected points pixel distance in pixelDist paramter **/
+void visualDistance( const int indexA, const int indexB, float& featureDist, int& pixelDist ) {
+
+    using namespace cv;
+
+    std::vector<KeyPoint> keypoints_1, keypoints_2;
+    keypoints_1 = cloudKeyPoints[indexA];
+    keypoints_2 = cloudKeyPoints[indexB];
 
     Mat descriptors_1, descriptors_2;
-
-    extractor.compute( img_1, keypoints_1, descriptors_1 );
-    extractor.compute( img_2, keypoints_2, descriptors_2 );
+    descriptors_1 = cloudDescriptors[indexA];
+    descriptors_2 = cloudDescriptors[indexB];
 
     //-- Step 3: Matching descriptor vectors using FLANN matcher
     FlannBasedMatcher matcher;
@@ -335,9 +400,9 @@ void visualDistance( const pcl::PointCloud<pcl::PointXYZRGB>& cloudA, const pcl:
     //-- Quick calculation of max and min distances between keypoints
     for( int i = 0; i < descriptors_1.rows; i++ )
     { double dist = matches[i].distance;
-      if( dist < min_dist ) min_dist = dist;
-      if( dist > max_dist ) max_dist = dist;
-      mean_dist += dist;
+        if( dist < min_dist ) min_dist = dist;
+        if( dist > max_dist ) max_dist = dist;
+        mean_dist += dist;
 
     }
 
@@ -348,26 +413,26 @@ void visualDistance( const pcl::PointCloud<pcl::PointXYZRGB>& cloudA, const pcl:
     //calculation of distance in pixels between best matches
     std::vector< DMatch > good_matches;
 
-   for( int i = 0; i < descriptors_1.rows; i++ )
-   {
-       if( matches[i].distance <= max(2*min_dist, 0.02) )
-       { good_matches.push_back( matches[i]); }
-   }
+    for( int i = 0; i < descriptors_1.rows; i++ )
+    {
+        if( matches[i].distance <= max(2*min_dist, 0.02) )
+        { good_matches.push_back( matches[i]); }
+    }
 
-   int img_dist=0;
-   for( int m =0; m < good_matches.size(); m++) {
-       int d=0;
-       int m1 = good_matches.at(m).queryIdx;
-       int m2 = good_matches.at(m).trainIdx;
+    int img_dist=0;
+    for( int m =0; m < good_matches.size(); m++) {
+        int d=0;
+        int m1 = good_matches.at(m).queryIdx;
+        int m2 = good_matches.at(m).trainIdx;
 
-       d += (keypoints_1.at(m1).pt.x - keypoints_2.at(m2).pt.x)*(keypoints_1.at(m1).pt.x - keypoints_2.at(m2).pt.x);
-       d += (keypoints_1.at(m1).pt.y - keypoints_2.at(m2).pt.y)*(keypoints_1.at(m1).pt.y - keypoints_2.at(m2).pt.y);
-       img_dist += std::sqrt(d);
-   }
+        d += (keypoints_1.at(m1).pt.x - keypoints_2.at(m2).pt.x)*(keypoints_1.at(m1).pt.x - keypoints_2.at(m2).pt.x);
+        d += (keypoints_1.at(m1).pt.y - keypoints_2.at(m2).pt.y)*(keypoints_1.at(m1).pt.y - keypoints_2.at(m2).pt.y);
+        img_dist += std::sqrt(d);
+    }
 
-   img_dist = img_dist/good_matches.size();
+    img_dist = img_dist/good_matches.size();
 
-   pixelDist = img_dist;
+    pixelDist = img_dist;
 }
 
 
@@ -410,6 +475,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         return;
     }
 
+    saveCloudDescriptors(min,prevCloud);
     fastBilFilter.setInputCloud(prevCloud.makeShared());
     fastBilFilter.filter(prevCloud);
 
@@ -432,9 +498,11 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     std::deque< pcl::PointCloud<pcl::PointXYZRGB> > cloudQueue;
     //cloudQueue.resize(4);
     bool showCorrespondences = false;
+    int prevCloudIndex;
     //in order execute algorithm just betwee two arbitrary clouds (user must give max < min)
     //just do one iteration from max to max!
     if( max < min ) {
+        prevCloudIndex = min;
         min = max -1;
         showCorrespondences = true;
     }
@@ -442,6 +510,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     bool automatic=true;
     //to have one pose / vertex per cloud, the first cloud is in the origin with no rotation
     poses.push_back( Eigen::Matrix4f::Identity()  );
+    writeTransformationQuaternion(Eigen::Matrix4f::Identity() , std::string(outFile) + std::string(".movements"));
+
     optimizer.addVertex( transf  );
     int prev_i=-1;
     //read file by file, save and quit if user press s
@@ -450,7 +520,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         //go ahead if user press n or is in automatic mode
         if( doNext || automatic ) {
 
-            doNext = false; 
+            doNext = false;
             pcl::PointCloud<pcl::PointXYZRGB> currCloud(640,480);
 
             //read current cloud from file
@@ -458,8 +528,9 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 std::cout << "Reading end at " << i << "\n";
                 break;
             }
+            saveCloudDescriptors(i,currCloud);
 
-            std::cout << "READEDDDDDD_--____: " << i << "\n";
+            std::cout << "READED consecutiv: " << i << "\n";
             /** end read next cloud **/
 
             /**
@@ -472,12 +543,20 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             fastBilFilter.setInputCloud(currCloud.makeShared());
             fastBilFilter.filter(currCloud);
 
+            if( showCorrespondences ) {
+                float visualDist;
+                int pixelDist;
+
+                visualDistance(i,prevCloudIndex,visualDist,pixelDist);
+                std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
+                std::cout << "currCloud: " <<  i << "prevCloud:" << prevCloudIndex << "\n";
+            }
+
             //start ICP
             icp.setInputSource(currCloud.makeShared());
             icp.setInputTarget(prevCloud.makeShared());
             pcl::PointCloud<pcl::PointXYZRGB> finalCloud(640,480);;
             icp.align (finalCloud);
-            pcl::copyPointCloud(currCloud,prevCloud);
 
             //update global transformation
             Eigen::Matrix4f icpTransf = icp.getFinalTransformation();
@@ -500,30 +579,27 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             //std::cout << "VERTEX ID::: " << vertexID << "\n";
             poses.push_back(transf.cast<float>());
 
-            const int QSIZE=5;
-
             if( vertexID > 0 ) {
                 int fromIndex=vertexID-1;
-                //add edges to optimizer
-                //read cloud by cloud starting by the newest
-                for(std::deque< pcl::PointCloud<pcl::PointXYZRGB> >::reverse_iterator iter = cloudQueue.rbegin();
-                    iter != cloudQueue.rend(); iter++ ) {
-                    //mem leak
-                    Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
-                    Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
+                //add graph consecutive edges to optimizer
+                //mem leak
+                Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
+                Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
 
-                    //optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
-                    optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
-                    if( *relPose != Eigen::Matrix4f::Identity() ) {
-                        //std::cout << "ADDING EDGE " << fromIndex << " - " << vertexID << "\n";
-                        optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
+                //optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
+                optimizer.genEdgeData(prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
+                if( *relPose != Eigen::Matrix4f::Identity() ) {
+                    //std::cout << "ADDING EDGE " << fromIndex << " - " << vertexID << "\n";
 
-                    }
-                    fromIndex--;
+                    optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
+                    //save edge on .txt files
+                    writeEdge(vertexID,fromIndex,*relPose,*infMatrix,outFile);
+
                 }
 
                 //add loop closure edges!
-                for( int k=(i-3*QSIZE); k >= (min +1); k=k-2 ) {
+                /**/
+                for( int k=(i-2); k >= (min +1); k=k-1 ) {
                     const float MAX_METERS = 1;
                     int currPoseIndex = i - min;
                     int pastPoseIndex = k - min;
@@ -532,22 +608,24 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
                         pcl::PointCloud<pcl::PointXYZRGB> pastCloud(640,480);
                         if( readCloud(k,path,pastCloud)  ) {
-
                             float visualDist;
                             int pixelDist;
-                            visualDistance(currCloud,pastCloud,visualDist,pixelDist);
+                            visualDistance(i,k,visualDist,pixelDist);
                             std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
-                            if( visualDist < 0.28 && pixelDist < 120 ) {
+                            std::cout << "i: " <<  i << "k:" << k << "\n";
+                            if( (visualDist < 0.2 && pixelDist < 50) || (visualDist < 0.28 && pixelDist < 30) ) {
 
                                 Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
                                 Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
                                 optimizer.genEdgeData(pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
 
                                 if( *relPose != Eigen::Matrix4f::Identity() ) {
-                                    saveCloudImage(currCloud, "cloud " +  boost::lexical_cast<std::string>(pastPoseIndex) + "-" + boost::lexical_cast<std::string>(currPoseIndex) + ".jpg" );
-                                    saveCloudImage(pastCloud, "cloud " +  boost::lexical_cast<std::string>(currPoseIndex) + "-" + boost::lexical_cast<std::string>(pastPoseIndex) + ".jpg" );
+                                    saveCloudImage(currCloud, "cloud_" +  boost::lexical_cast<std::string>(i) + "-" + boost::lexical_cast<std::string>(k) + ".jpg" );
+                                    saveCloudImage(pastCloud, "cloud_" +  boost::lexical_cast<std::string>(k) + "-" + boost::lexical_cast<std::string>(i) + ".jpg" );
                                     std::cout << "ADDING LOOP CLOSURE " << k-1 << " - " << i-1 << "\n";
                                     optimizer.addEdge(currPoseIndex,pastPoseIndex,*relPose,*infMatrix);
+                                    //save edge on .txt files
+                                    writeEdge(currPoseIndex,pastPoseIndex,*relPose,*infMatrix,outFile);
                                     prev_i  = i;
 
                                 }
@@ -556,19 +634,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     }
                 }
 
-
-
-//                for(int k=0; k < (poses.size()); k++) {
-//                    std::cout << "distance :: " << k << " --- " << matrixDistance(poses.at(k).cast<float>(),transf.cast<float>()) << "\n";
-//                }
             }
-
-            //add cloud to queue
-            cloudQueue.push_back(currCloud);
-            //mantain a constant size
-            if ( cloudQueue.size() >= QSIZE ) {
-                cloudQueue.pop_front();
-            }
+            /**/
             /**/
             //writeTransformation(icp.getFinalTransformation(), std::string(outFile) + std::string(".movements"));
             writeTransformationQuaternion(transf.cast<float>(), std::string(outFile) + std::string(".movements"));
@@ -592,6 +659,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             if( showCorrespondences ) {
 
                 showCorrespondences = false;
+                viewer->addPointCloud(globalCloud.makeShared());
+                /** Show Corresp
                 pcl::Correspondences cor = icp.getCorrespondences();
                 viewer->addPointCloud(icp.getSourceFiltered().makeShared(),"source");
                 viewer->addPointCloud(icp.getTargetFiltered().makeShared(),"target");
@@ -600,6 +669,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     pcl::Correspondence corresp = cor.at(k);
                     viewer->addLine( icp.getSourceFiltered().points[corresp.index_query],icp.getTargetFiltered().points[corresp.index_match],rand_alnum_str(k+2) );
                 }
+                /**/
 
             } else {
                 /** Apply Voxel Filter*
@@ -607,8 +677,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 voxelFilter.filter(globalCloud);
                 /**/
                 viewer->removeAllPointClouds();
-//                viewer->addPointCloud(globalCloud.makeShared());
-
+                //viewer->addPointCloud(globalCloud.makeShared());
 
             }
 
@@ -630,6 +699,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             //dont skip the current capture
             --i;
         }
+
+
     } //end for
     std::cout << "out for\n\n";
 
@@ -655,7 +726,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     saveState(globalCloud,transf.cast<float>(),outFile);
     return;
 
-/*
+    /*
     while( !viewer->wasStopped() ) {
 
         viewer->spinOnce (100);
@@ -686,15 +757,28 @@ int main (int argc, char** argv)
 
     if( argc < 5) {
 
-        std::cout << "Usage:\n " << argv[0] << " [global_cloud] path min_index max_index out_file\n";
-        std::cout << "Example:\n " << argv[0] << " car 2 10 car.pcd\n";
-        std::cout << "Will use car/cap2 until car/cap10 and save the aligned clouds in car.pcd\n";
-        std::cout <<  argv[0] << " global_car.pcd car 2 10 car.pcd\n";
-        std::cout << "Will load and apply global_car.pcd.transf and then add  car/cap2 until car/cap10 to global_car.pcd and save the aligned clouds in car.pcd\n";
-        std::cout <<  argv[0] << " movements.txt car 2 10 car.pcd\n";
-        std::cout << "Will apply movements to each cloud and will generate a global cloud car.pcd with them\n";
+        if( argc == 3 ) {
+            if( readAndOptimizeGraph(argv[1],argv[2]) ) {
+                std::cout << "Optimized positions saved in " << argv[2] << "\n";
 
-        return 0;
+            } else {
+                std::cout << "Error reading files, check that .movements, .from_to.txt, .fitness.txt, .relativeTransf.txt are ok\n";
+
+            }
+            return 0;
+        } else {
+
+            std::cout << "Usage:\n " << argv[0] << " [global_cloud] path min_index max_index out_file\n";
+            std::cout << "Example:\n " << argv[0] << " car 2 10 car.pcd\n";
+            std::cout << "Will use car/cap2 until car/cap10 and save the aligned clouds in car.pcd\n";
+            std::cout <<  argv[0] << " global_car.pcd car 2 10 car.pcd\n";
+            std::cout << "Will load and apply global_car.pcd.transf and then add  car/cap2 until car/cap10 to global_car.pcd and save the aligned clouds in car.pcd\n";
+            std::cout <<  argv[0] << " movements.txt car 2 10 car.pcd\n";
+            std::cout << "Will apply movements to each cloud and will generate a global cloud car.pcd with them\n";
+            std::cout <<  argv[0] << " car.pcd car.pcd.optimized_poses\n";
+            std::cout << "Will run graph optimizer (it will read car.pcd.movements,car.pcd..from_to.txt,car.pcd.fitness.txt,car.pcd.relativeTransf.txt to read graph) \n";
+            return 0;
+        }
 
     } else {
 

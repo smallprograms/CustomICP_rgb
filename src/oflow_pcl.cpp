@@ -103,6 +103,7 @@ void sortCloud( pcl::PointCloud<pcl::PointXYZ>& cornersCloudA,  pcl::PointCloud<
 
 }
 
+
 Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudB, float maxCorrespDist) {
 
     cv::Mat imgAcolor(480,640,CV_8UC3);

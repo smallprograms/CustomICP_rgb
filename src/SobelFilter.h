@@ -82,40 +82,51 @@ inline float flann_knn(cv::Mat& m_destinations, cv::Mat& m_object, std::vector<i
 
     return cv::sum(m_dists)[0]/m_dists.rows;
 }
-
+/** Input: source matrix, destination matrix, Output: rotation matrix and translation vector */
 inline void findTransformSVD(cv::Mat& _m, cv::Mat& _d, cv::Mat& outR, cv::Scalar& outT) {
     using namespace cv;
     Mat m; _m.convertTo(m,CV_32F);
     Mat d; _d.convertTo(d,CV_32F);
 
-    Scalar d_bar = mean(_d);
-    Scalar m_bar = mean(_m);
-    std::cout << "dbarrrrr" << d_bar << "\n";
-    std::cout << "mbar" << m_bar << "\n";
-    Mat mc = m - m_bar;
-    Mat dc = d - d_bar;
-
-    mc = mc.reshape(1); dc = dc.reshape(1);
-
-    Mat H(2,2,CV_32FC1);
-    for(int i=0;i<mc.rows;i++) {
-        Mat mci = mc(Range(i,i+1),Range(0,2));
-        Mat dci = dc(Range(i,i+1),Range(0,2));
-        H = H + mci.t() * dci;
+    Mat mMean;
+    Mat dMean;
+    //get centroids
+    reduce(m, mMean, 0,CV_REDUCE_AVG);
+    reduce(d, dMean, 0,CV_REDUCE_AVG);
+    //substract centroids from each point set
+    for(int k=0;k<m.rows;k++) {
+        m.row(k).at<float>(0) -=  mMean.row(0).at<float>(0);
+        m.row(k).at<float>(1) -=  mMean.row(0).at<float>(1);
     }
 
+    for(int k=0;k<d.rows;k++) {
+        d.row(k).at<float>(0) -=  dMean.row(0).at<float>(0);
+        d.row(k).at<float>(1) -=  dMean.row(0).at<float>(1);
+    }
+    //calculate H matrix
+    Mat H = Mat::zeros(2,2,CV_32FC1);
+    for(int i=0;i<m.rows;i++) {
+        Mat mci = m.row(i);
+        Mat dci = d.row(i);
+        H = H + mci.t()  * dci;
+    }
+    //calculate SVD over H to find rotation
     cv::SVD svd(H);
 
+    //obtain rotation
     Mat R = svd.vt.t() * svd.u.t();
+    //check if R is orthogonal?
     double det_R = cv::determinant(R);
-    std::cout << "detR" << det_R << "\n";
     if(abs(det_R + 1.0) < 0.0001) {
         float _tmp[4] = {1,0,0,cv::determinant(svd.vt*svd.u)};
         R = svd.u * Mat(2,2,CV_32FC1,_tmp) * svd.vt;
     }
 
     float* _R = R.ptr<float>(0);
-    Scalar T(d_bar[0] - (m_bar[0]*_R[0] + m_bar[1]*_R[1]),d_bar[1] - (m_bar[0]*_R[2] + m_bar[1]*_R[3]));
+    //translation is d - m*rot
+    Scalar T(dMean.row(0).at<float>(0) - (mMean.row(0).at<float>(0)*_R[0] + mMean.row(0).at<float>(1)*_R[1]),
+            dMean.row(0).at<float>(1) - (mMean.row(0).at<float>(0)*_R[2] + mMean.row(0).at<float>(1)*_R[3]));
+
 
     outR = R;
     outT = T;
@@ -162,6 +173,7 @@ public:
     void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
     void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
     void applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered);
+    cv::Mat runICP(cv::Mat src, cv::Mat tgt, int maxIter);
 
     /** \brief Compute the intensity average for a single point
     * \param[in] pid the point index to compute the weight for
@@ -274,7 +286,13 @@ SobelFilter<PointT>::getImageBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr clou
      /// Total Gradient (approximate)
      addWeighted( abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad );
      threshold(grad,grad,75,255,THRESH_BINARY);
-     imwrite("sobel_color.jpg",grad);
+
+     static std::string id("a");
+     std::string name=std::string("sobel_img")+id+std::string(".jpg");
+     imwrite(name.c_str(),grad);
+     if( id=="a") id="b";
+     else if( id=="b") id="a";
+
 
      return grad;
 
@@ -453,7 +471,7 @@ cv::Mat SobelFilter<PointT>::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& 
 template <typename PointT>
 cv::Mat SobelFilter<PointT>::getPoints(cv::Mat bordersImage)
 {
-    std::cout << "GETPPPPasdfasfaf2313\n\n";
+
     cv::Point2i point;
 
 
@@ -502,41 +520,79 @@ SobelFilter<PointT>::setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &targ
     targetCloud = target;
 }
 
+template <typename PointT> cv::Mat
+SobelFilter<PointT>::runICP(cv::Mat src, cv::Mat tgt, int maxIter) {
+
+
+    cv::Mat R = cv::Mat::eye(2,2,CV_32F);
+    cv::Scalar T(0,0,0,0);
+
+    for(int k=0; k < maxIter; k++) {
+        std::vector<int> pairs;
+        std::vector<float> dists;
+        //apply ICP to find best R,t between source and target points
+        int dist = flann_knn(src,tgt,pairs,dists); //get closest points!
+
+        //closest points from src to tgt
+        cv::Mat corresp(tgt.size(),tgt.type());
+        for(int i=0;i<tgt.rows;i++) {
+            cv::Point p = src.at<cv::Point>(pairs[i],0);
+            corresp.at<cv::Point>(i,0) = p;
+
+        }
+
+        cv::Mat Rlocal;
+        cv::Scalar Tlocal;
+        //get R,t
+        findTransformSVD(corresp,tgt,Rlocal,Tlocal);
+        R = Rlocal*R;
+        T = T + Tlocal;
+        //apply R,t
+        for(int i=0;i<tgt.rows;i++) {
+            //rotate point
+            corresp.at<cv::Point>(i,0).x = R.at<float>(0,0)*corresp.at<cv::Point>(i,0).x + R.at<float>(0,1)*corresp.at<cv::Point>(i,0).y;
+            corresp.at<cv::Point>(i,0).y = R.at<float>(1,0)*corresp.at<cv::Point>(i,0).x + R.at<float>(1,1)*corresp.at<cv::Point>(i,0).y;
+            //translate point
+            corresp.at<cv::Point>(i,0).x += T(0);
+            corresp.at<cv::Point>(i,0).y += T(1);
+        }
+    }
+
+
+    cv::Mat Affine(2,3,CV_32F);
+    //put rotation and translation inside Affine matrix
+    Affine.at<float>(0,0) = R.at<float>(0,0);
+    Affine.at<float>(0,1) = R.at<float>(0,1);
+    Affine.at<float>(1,0) = R.at<float>(1,0);
+    Affine.at<float>(1,1) = R.at<float>(1,1);
+    Affine.at<float>(0,2) = T(0);
+    Affine.at<float>(1,2) = T(1);
+
+    return Affine;
+}
+
 template <typename PointT> void
 SobelFilter<PointT>::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered, pcl::PointCloud<pcl::PointXYZRGB>&targetFiltered)
 {
     setCloudAsNaN(sourceFiltered);
     setCloudAsNaN(targetFiltered);
+    //apply sobel filter to RGB image and get only points with DEPTH not null at depthmap
     cv::Mat sourceBorders = getBorders(sourceCloud);
     cv::Mat targetBorders = getBorders(targetCloud);
-    std::vector<int> pairs;
-    std::vector<float> dists;
 
+    //get point coordinates of each image point corresponding to a border
     cv::Mat sourcePoints = getPoints(sourceBorders);
     cv::Mat targetPoints = getPoints(targetBorders);
 
-    int dist = flann_knn(sourcePoints,targetPoints,pairs,dists);
-    cv::Mat corresp(targetPoints.size(),targetPoints.type());
-    for(int i=0;i<targetPoints.rows;i++) {
-        cv::Point p = sourcePoints.at<cv::Point>(pairs[i],0);
-        corresp.at<cv::Point>(i,0) = p;
+    cv::Mat Affine = runICP(sourcePoints,targetPoints,10);
+    cv::Mat outMat;
+    //apply rotation and translation ot image
+    cv::warpAffine(sourceBorders, outMat, Affine, cv::Size(sourceBorders.cols,sourceBorders.rows));
 
-    }
-    cv::Mat R;
-    cv::Scalar T;
-    findTransformSVD(targetPoints,corresp,R,T);
-    std::cout << R << "\n";
-    std::cout << T << "\n";
-    std::cout << "DISTdffANCE 2D::: " << dist << "\n";
-    std::cout << "adfasdf APPP FILTER\n\n\n\n\n" << sourcePoints.size() << "\n";
-//    for(int k=0; k < dists.size(); k++ ) {
-//        std::cout << "ddddddD: " << dists[k] << "\n";
-//    }
-    std::cout << "adf APPP FILTER\n\n\n\n\n" << sourcePoints.size() << "\n";
-//    static std::string id("a");
-//    std::string name=std::string("sobel_img")+id+std::string(".jpg");
-//    imwrite(name.c_str(),imgBorder);
-//    if( id=="a") id="b";
-//    else if( id=="b") id="a";
+    static std::string id("a");
+    std::string name=std::string("rotated")+id+std::string(".jpg");
+    imwrite(name.c_str(),outMat);
+    if( id=="a") id="b";
+    else if( id=="b") id="a";
 }
 #endif // PCL_FILTERS_BILATERAL_H_

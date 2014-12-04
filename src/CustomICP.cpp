@@ -1,4 +1,5 @@
 ﻿#include "CustomICP.h"
+#include "SobelFilter.h"
 #include "time.h"
 #include <stdlib.h>
 

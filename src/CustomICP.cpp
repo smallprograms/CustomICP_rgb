@@ -75,12 +75,6 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     pcl::PointCloud<pcl::PointXYZRGB> sobSrc(640,480);
 
 
-    sobFilter.setInputCloud(tgt);
-    sobFilter.applyFilter(sobTgt);
-    sobFilter.setInputCloud(src);
-    sobFilter.applyFilter(sobSrc);
-
-    std::cout << "asdfasf 1123\n";
     sobFilter.setSourceCloud(src);
     sobFilter.setTargetCloud(tgt);
     sobFilter.applyFilter(sobSrc,sobTgt);
@@ -123,9 +117,9 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     fitness = icp.getFitnessScore(); //segfault if you call this methoud without called icp.align first
 
     /** SECOND ICP WITH DIFFERENT MAX DISTANCE*/
-//    icp.setMaxCorrespondenceDistance(0.015);
-//    icp.align(cloud, finalTransf);
-//    finalTransf = icp.getFinalTransformation();
+    icp.setMaxCorrespondenceDistance(0.03);
+    icp.align(cloud, finalTransf);
+    finalTransf = icp.getFinalTransformation();
 //    correspondences = customCorresp->getCorrespondences();
 
 //    icp.setMaxCorrespondenceDistance(0.0075);

@@ -575,65 +575,68 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             //std::cout << "Fitness: " << icp.getFitnessScore() << " - Correspondences: " <<  icp.getCorrespondences().size() << "\n";
 
             /**/
-            int vertexID = optimizer.addVertex(transf);
-            //std::cout << "VERTEX ID::: " << vertexID << "\n";
-            poses.push_back(transf.cast<float>());
 
-            if( vertexID > 0 ) {
-                int fromIndex=vertexID-1;
-                //add graph consecutive edges to optimizer
-                //mem leak
-                Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
-                Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
+            if( showCorrespondences == false ) {
+                int vertexID = optimizer.addVertex(transf);
+                //std::cout << "VERTEX ID::: " << vertexID << "\n";
+                poses.push_back(transf.cast<float>());
 
-                //optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
-                optimizer.genEdgeData(prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
-                if( *relPose != Eigen::Matrix4f::Identity() ) {
-                    //std::cout << "ADDING EDGE " << fromIndex << " - " << vertexID << "\n";
+                if( vertexID > 0 ) {
+                    int fromIndex=vertexID-1;
+                    //add graph consecutive edges to optimizer
+                    //mem leak
+                    Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
+                    Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
 
-                    optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
-                    //save edge on .txt files
-                    writeEdge(vertexID,fromIndex,*relPose,*infMatrix,outFile);
+                    //optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
+                    optimizer.genEdgeData(prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
+                    if( *relPose != Eigen::Matrix4f::Identity() ) {
+                        //std::cout << "ADDING EDGE " << fromIndex << " - " << vertexID << "\n";
 
-                }
+                        optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
+                        //save edge on .txt files
+                        writeEdge(vertexID,fromIndex,*relPose,*infMatrix,outFile);
 
-                //add loop closure edges!
-                /**/
-                for( int k=(i-2); k >= (min +1); k=k-1 ) {
-                    const float MAX_METERS = 1;
-                    int currPoseIndex = i - min;
-                    int pastPoseIndex = k - min;
+                    }
 
-                    if ( matrixDistance(poses.at(currPoseIndex),poses.at(pastPoseIndex)) < MAX_METERS  && prev_i != (i-1) )  {
+                    //add loop closure edges!
+                    /**/
+                    for( int k=(i-2); k >= (min +1); k=k-1 ) {
+                        const float MAX_METERS = 1;
+                        int currPoseIndex = i - min;
+                        int pastPoseIndex = k - min;
 
-                        pcl::PointCloud<pcl::PointXYZRGB> pastCloud(640,480);
-                        if( readCloud(k,path,pastCloud)  ) {
-                            float visualDist;
-                            int pixelDist;
-                            visualDistance(i,k,visualDist,pixelDist);
-                            std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
-                            std::cout << "i: " <<  i << "k:" << k << "\n";
-                            if( (visualDist < 0.2 && pixelDist < 50) || (visualDist < 0.28 && pixelDist < 30) ) {
+                        if ( matrixDistance(poses.at(currPoseIndex),poses.at(pastPoseIndex)) < MAX_METERS  && prev_i != (i-1) )  {
 
-                                Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
-                                Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
-                                optimizer.genEdgeData(pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
+                            pcl::PointCloud<pcl::PointXYZRGB> pastCloud(640,480);
+                            if( readCloud(k,path,pastCloud)  ) {
+                                float visualDist;
+                                int pixelDist;
+                                visualDistance(i,k,visualDist,pixelDist);
+                                std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
+                                std::cout << "i: " <<  i << "k:" << k << "\n";
+                                if( (visualDist < 0.2 && pixelDist < 50) || (visualDist < 0.28 && pixelDist < 30) ) {
 
-                                if( *relPose != Eigen::Matrix4f::Identity() ) {
-                                    saveCloudImage(currCloud, "cloud_" +  boost::lexical_cast<std::string>(i) + "-" + boost::lexical_cast<std::string>(k) + ".jpg" );
-                                    saveCloudImage(pastCloud, "cloud_" +  boost::lexical_cast<std::string>(k) + "-" + boost::lexical_cast<std::string>(i) + ".jpg" );
-                                    std::cout << "ADDING LOOP CLOSURE " << k-1 << " - " << i-1 << "\n";
-                                    optimizer.addEdge(currPoseIndex,pastPoseIndex,*relPose,*infMatrix);
-                                    //save edge on .txt files
-                                    writeEdge(currPoseIndex,pastPoseIndex,*relPose,*infMatrix,outFile);
-                                    prev_i  = i;
+                                    Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
+                                    Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
+                                    optimizer.genEdgeData(pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
 
+                                    if( *relPose != Eigen::Matrix4f::Identity() ) {
+                                        saveCloudImage(currCloud, "cloud_" +  boost::lexical_cast<std::string>(i) + "-" + boost::lexical_cast<std::string>(k) + ".jpg" );
+                                        saveCloudImage(pastCloud, "cloud_" +  boost::lexical_cast<std::string>(k) + "-" + boost::lexical_cast<std::string>(i) + ".jpg" );
+                                        std::cout << "ADDING LOOP CLOSURE " << k-1 << " - " << i-1 << "\n";
+                                        optimizer.addEdge(currPoseIndex,pastPoseIndex,*relPose,*infMatrix);
+                                        //save edge on .txt files
+                                        writeEdge(currPoseIndex,pastPoseIndex,*relPose,*infMatrix,outFile);
+                                        prev_i  = i;
+
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
+                }
             }
             /**/
             /**/
@@ -704,20 +707,23 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     } //end for
     std::cout << "out for\n\n";
 
-    while( !viewer->wasStopped() ) {
+    while( !viewer->wasStopped() && showCorrespondences ) {
 
         viewer->spinOnce (100);
         boost::this_thread::sleep (boost::posix_time::microseconds (100000));
 
     }
-    /**/
-    optimizer.optimizeGraph();
-    std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >  poses;
-    optimizer.getPoses(poses);
+
+    if( showCorrespondences == false ) {
+        /**/
+        optimizer.optimizeGraph();
+        std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >  poses;
+        optimizer.getPoses(poses);
 
 
-    for( std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >::iterator iter = poses.begin(); iter != poses.end(); iter++ ) {
-        writeTransformationQuaternion(*iter,std::string(outFile) + std::string(".optimized"));
+        for( std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >::iterator iter = poses.begin(); iter != poses.end(); iter++ ) {
+            writeTransformationQuaternion(*iter,std::string(outFile) + std::string(".optimized"));
+        }
     }
     /**/
     std::string prevTransfFile(outFile);

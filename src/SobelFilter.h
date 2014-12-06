@@ -74,6 +74,7 @@ inline float flann_knn(cv::Mat& m_destinations, cv::Mat& m_object, std::vector<i
     int* indices_ptr = m_indices.ptr<int>(0);
     //float* dists_ptr = m_dists.ptr<float>(0);
     for (int i=0;i<m_indices.rows;++i) {
+        //target index:i source index:indices.at(i)
         ptpairs.push_back(indices_ptr[i]);
     }
 
@@ -173,7 +174,7 @@ public:
     void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
     void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
     void applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered);
-    cv::Mat runICP(cv::Mat src, cv::Mat tgt, int maxIter);
+    cv::Mat runICP(cv::Mat src, cv::Mat tgt, int maxIter,std::vector<int>& pairs, std::vector<float>& dists);
 
     /** \brief Compute the intensity average for a single point
     * \param[in] pid the point index to compute the weight for
@@ -276,25 +277,21 @@ SobelFilter<PointT>::getImageBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr clou
     int delta = 0;
     int ddepth = CV_16S;
     Sobel( imgGray, grad_x, ddepth, 1, 0, 3, scale, delta, BORDER_CONSTANT );
-     convertScaleAbs( grad_x, abs_grad_x );
+    convertScaleAbs( grad_x, abs_grad_x );
 
-     /// Gradient Y
-     //Scharr( src_gray, grad_y, ddepth, 0, 1, scale, delta, BORDER_DEFAULT );
-     Sobel( imgGray, grad_y, ddepth, 0, 1, 3, scale, delta, BORDER_CONSTANT );
-     convertScaleAbs( grad_y, abs_grad_y );
+    /// Gradient Y
+    //Scharr( src_gray, grad_y, ddepth, 0, 1, scale, delta, BORDER_DEFAULT );
+    Sobel( imgGray, grad_y, ddepth, 0, 1, 3, scale, delta, BORDER_CONSTANT );
+    convertScaleAbs( grad_y, abs_grad_y );
 
-     /// Total Gradient (approximate)
-     addWeighted( abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad );
-     threshold(grad,grad,75,255,THRESH_BINARY);
-
-     static std::string id("a");
-     std::string name=std::string("sobel_img")+id+std::string(".jpg");
-     imwrite(name.c_str(),grad);
-     if( id=="a") id="b";
-     else if( id=="b") id="a";
+    /// Total Gradient (approximate)
+    addWeighted( abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad );
+    threshold(grad,grad,75,255,THRESH_BINARY);
 
 
-     return grad;
+
+
+    return grad;
 
 }
 
@@ -305,11 +302,11 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
     //std::cout << "Aplying sobel filter\n";
 
     // Check if sigma_s has been given by the user
-//    if (sigma_s_ == 0)
-//    {
-//        PCL_ERROR ("[pcl::SobelFilter::applyFilter] Need a sigma_s value given before continuing.\n");
-//        return;
-//    }
+    //    if (sigma_s_ == 0)
+    //    {
+    //        PCL_ERROR ("[pcl::SobelFilter::applyFilter] Need a sigma_s value given before continuing.\n");
+    //        return;
+    //    }
     // In case a search method has not been given, initialize it using some defaults
     /*
     if (!tree_)
@@ -349,9 +346,9 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
                     pcl::isFinite(input_->at(m,j_max))
                     && pcl::isFinite(input_->at(i_min,j_max)) && pcl::isFinite(input_->at(i_max,j_max)) && pcl::isFinite(input_->at(i_max,n))
                     && pcl::isFinite(input_->at(i_min,n)) /*
-                    && input_->at(i_min,j_min).z != 0 && input_->at(i_max,j_min).z != 0 && input_->at(m,j_min).z != 0
-                    && input_->at(m,j_max).z != 0 && input_->at(i_min,j_max).z !=0 && input_->at(i_max,j_max).z != 0 &&
-                    input_->at(i_max,n).z != 0 && input_->at(i_min,n).z != 0 */) {
+                            && input_->at(i_min,j_min).z != 0 && input_->at(i_max,j_min).z != 0 && input_->at(m,j_min).z != 0
+                            && input_->at(m,j_max).z != 0 && input_->at(i_min,j_max).z !=0 && input_->at(i_max,j_max).z != 0 &&
+                            input_->at(i_max,n).z != 0 && input_->at(i_min,n).z != 0 */) {
 
 
                 //horizontal diff mask
@@ -384,7 +381,7 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
                      output(m+1,n+1) = input_->at(m+1,n+1);
                      output(m-1,n+1) = input_->at(m-1,n+1);
                     /**/
-                     numPoints++;
+                    numPoints++;
 
 
                 }
@@ -392,25 +389,25 @@ SobelFilter<PointT>::applyFilter (PointCloud &output)
             }
         }
     }
-    static std::string id("a");
-    std::string name=std::string("sobel_img")+id+std::string(".jpg");
-    imwrite(name.c_str(),imgBorder);
-    if( id=="a") id="b";
-    else if( id=="b") id="a";
+    //    static std::string id("a");
+    //    std::string name=std::string("sobel_img")+id+std::string(".jpg");
+    //    imwrite(name.c_str(),imgBorder);
+    //    if( id=="a") id="b";
+    //    else if( id=="b") id="a";
 
     //std::cout << "ssssssssssssssssssnum points passed SobeL less points: " << numPoints << "\n dsafasdf\n";
 
     //reject far lines!
-//    const float MAX_Z_DIST=2.5;
-//    for(size_t m=win_width/2+1; m < (input_->width-win_width/2-1); m++) {
-//        for(size_t n=win_height/2+1; n < (input_->height-win_height/2-1); n++) {
+    //    const float MAX_Z_DIST=2.5;
+    //    for(size_t m=win_width/2+1; m < (input_->width-win_width/2-1); m++) {
+    //        for(size_t n=win_height/2+1; n < (input_->height-win_height/2-1); n++) {
 
-//            if( output(m,n).z != std::numeric_limits<float>::quiet_NaN() ) {
+    //            if( output(m,n).z != std::numeric_limits<float>::quiet_NaN() ) {
 
-//                if( output(m,n).z > MAX_Z_DIST )  output(m,n).x=output(m,n).y=output(m,n).z = std::numeric_limits<float>::quiet_NaN();
-//            }
-//        }
-//    }
+    //                if( output(m,n).z > MAX_Z_DIST )  output(m,n).x=output(m,n).y=output(m,n).z = std::numeric_limits<float>::quiet_NaN();
+    //            }
+    //        }
+    //    }
 
 }
 template <typename PointT>
@@ -420,8 +417,8 @@ cv::Mat SobelFilter<PointT>::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& 
     cv::Mat imgBorder = cv::Mat::zeros(480,640,CV_8UC1);
     cv::Mat rgbBorder = getImageBorders(bordersImage);
 
-    for(size_t m=win_width/2+1; m < (input_->width-win_width/2-1); m++) {
-        for(size_t n=win_height/2+1; n < (input_->height-win_height/2-1); n++) {
+    for(size_t m=win_width/2+1; m < (bordersImage->width-win_width/2-1); m++) {
+        for(size_t n=win_height/2+1; n < (bordersImage->height-win_height/2-1); n++) {
 
 
             size_t j_min = n-win_width/2;
@@ -433,9 +430,9 @@ cv::Mat SobelFilter<PointT>::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& 
                     pcl::isFinite(bordersImage->at(m,j_max))
                     && pcl::isFinite(bordersImage->at(i_min,j_max)) && pcl::isFinite(bordersImage->at(i_max,j_max)) && pcl::isFinite(bordersImage->at(i_max,n))
                     && pcl::isFinite(bordersImage->at(i_min,n)) /*
-                    && cloud->at(i_min,j_min).z != 0 && cloud->at(i_max,j_min).z != 0 && cloud->at(m,j_min).z != 0
-                    && cloud->at(m,j_max).z != 0 && cloud->at(i_min,j_max).z !=0 && cloud->at(i_max,j_max).z != 0 &&
-                    cloud->at(i_max,n).z != 0 && cloud->at(i_min,n).z != 0 */) {
+                            && cloud->at(i_min,j_min).z != 0 && cloud->at(i_max,j_min).z != 0 && cloud->at(m,j_min).z != 0
+                            && cloud->at(m,j_max).z != 0 && cloud->at(i_min,j_max).z !=0 && cloud->at(i_max,j_max).z != 0 &&
+                            cloud->at(i_max,n).z != 0 && cloud->at(i_min,n).z != 0 */) {
 
 
                 //horizontal diff mask
@@ -464,6 +461,12 @@ cv::Mat SobelFilter<PointT>::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& 
             }
         }
     }
+
+    static std::string id("a");
+    std::string name=std::string("sobel_img")+id+std::string(".jpg");
+    imwrite(name.c_str(),imgBorder);
+    if( id=="a") id="b";
+    else if( id=="b") id="a";
 
     return imgBorder;
 }
@@ -521,22 +524,30 @@ SobelFilter<PointT>::setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &targ
 }
 
 template <typename PointT> cv::Mat
-SobelFilter<PointT>::runICP(cv::Mat src, cv::Mat tgt, int maxIter) {
+SobelFilter<PointT>::runICP(cv::Mat src, cv::Mat tgt, int maxIter,std::vector<int>& pairs, std::vector<float>& dists) {
 
 
     cv::Mat R = cv::Mat::eye(2,2,CV_32F);
     cv::Scalar T(0,0,0,0);
-
+    cv::Mat srcMoved = src.clone();
+    float prevDist=0;
     for(int k=0; k < maxIter; k++) {
-        std::vector<int> pairs;
-        std::vector<float> dists;
-        //apply ICP to find best R,t between source and target points
-        int dist = flann_knn(src,tgt,pairs,dists); //get closest points!
 
-        //closest points from src to tgt
+        pairs.clear();
+        dists.clear();
+
+        //apply ICP to find best R,t between source and target points
+        int dist = flann_knn(srcMoved,tgt,pairs,dists); //get closest points!
+        if( dist == prevDist ) {
+            std::cout << "breakin at " << k << " iteration\n";
+            break;
+        }
+        prevDist = dist;
+        //fill corresp with closest points from src to tgt
+        //target point i matches with pairs[i] point
         cv::Mat corresp(tgt.size(),tgt.type());
         for(int i=0;i<tgt.rows;i++) {
-            cv::Point p = src.at<cv::Point>(pairs[i],0);
+            cv::Point p = srcMoved.at<cv::Point>(pairs[i],0);
             corresp.at<cv::Point>(i,0) = p;
 
         }
@@ -545,16 +556,17 @@ SobelFilter<PointT>::runICP(cv::Mat src, cv::Mat tgt, int maxIter) {
         cv::Scalar Tlocal;
         //get R,t
         findTransformSVD(corresp,tgt,Rlocal,Tlocal);
+
         R = Rlocal*R;
         T = T + Tlocal;
-        //apply R,t
-        for(int i=0;i<tgt.rows;i++) {
+        //apply R,t to srcMoved
+        for(int i=0;i<srcMoved.rows;i++) {
             //rotate point
-            corresp.at<cv::Point>(i,0).x = R.at<float>(0,0)*corresp.at<cv::Point>(i,0).x + R.at<float>(0,1)*corresp.at<cv::Point>(i,0).y;
-            corresp.at<cv::Point>(i,0).y = R.at<float>(1,0)*corresp.at<cv::Point>(i,0).x + R.at<float>(1,1)*corresp.at<cv::Point>(i,0).y;
+            srcMoved.at<cv::Point>(i,0).x = Rlocal.at<float>(0,0)*srcMoved.at<cv::Point>(i,0).x + Rlocal.at<float>(0,1)*srcMoved.at<cv::Point>(i,0).y;
+            srcMoved.at<cv::Point>(i,0).y = Rlocal.at<float>(1,0)*srcMoved.at<cv::Point>(i,0).x + Rlocal.at<float>(1,1)*srcMoved.at<cv::Point>(i,0).y;
             //translate point
-            corresp.at<cv::Point>(i,0).x += T(0);
-            corresp.at<cv::Point>(i,0).y += T(1);
+            srcMoved.at<cv::Point>(i,0).x += Tlocal(0);
+            srcMoved.at<cv::Point>(i,0).y += Tlocal(1);
         }
     }
 
@@ -567,7 +579,7 @@ SobelFilter<PointT>::runICP(cv::Mat src, cv::Mat tgt, int maxIter) {
     Affine.at<float>(1,1) = R.at<float>(1,1);
     Affine.at<float>(0,2) = T(0);
     Affine.at<float>(1,2) = T(1);
-
+    std::cout << "AFINE:\n" << Affine << "\n";
     return Affine;
 }
 
@@ -579,20 +591,69 @@ SobelFilter<PointT>::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFilter
     //apply sobel filter to RGB image and get only points with DEPTH not null at depthmap
     cv::Mat sourceBorders = getBorders(sourceCloud);
     cv::Mat targetBorders = getBorders(targetCloud);
+    cv::Mat transf = cv::estimateRigidTransform(sourceBorders,targetBorders,false);
+    std::cout << transf << "\n";
 
-    //get point coordinates of each image point corresponding to a border
-    cv::Mat sourcePoints = getPoints(sourceBorders);
-    cv::Mat targetPoints = getPoints(targetBorders);
+    if( transf.rows == 0 ) {
 
-    cv::Mat Affine = runICP(sourcePoints,targetPoints,10);
-    cv::Mat outMat;
-    //apply rotation and translation ot image
-    cv::warpAffine(sourceBorders, outMat, Affine, cv::Size(sourceBorders.cols,sourceBorders.rows));
+        for(int m=0; m < sourceBorders.rows; m++) {
+            for(int n=0; n < sourceBorders.cols; n++) {
 
-    static std::string id("a");
-    std::string name=std::string("rotated")+id+std::string(".jpg");
-    imwrite(name.c_str(),outMat);
-    if( id=="a") id="b";
-    else if( id=="b") id="a";
+                if( sourceBorders.at<uchar>(m,n) > 150 ) {
+                    sourceFiltered(n,m) = sourceCloud->at(n,m);
+                }
+                if( targetBorders.at<uchar>(m,n) > 150 ) {
+                    targetFiltered(n,m) = targetCloud->at(n,m);
+                }
+
+            }
+        }
+
+    } else {
+
+
+        cv::Mat movedSource;
+        cv::Mat intersectionTarget;
+        cv::Mat intersectionSource;
+        //    //apply rotation and translation ot image
+        cv::warpAffine(sourceBorders, movedSource, transf, cv::Size(sourceBorders.cols,sourceBorders.rows));
+        cv::bitwise_and(movedSource,targetBorders,intersectionTarget);
+        cv::Mat AffineInv;
+        cv::invertAffineTransform(transf,AffineInv);
+        std::cout << AffineInv << "\n";
+        cv::warpAffine(intersectionTarget, intersectionSource, AffineInv, cv::Size(sourceBorders.cols,sourceBorders.rows));
+
+        std::cout << "ROWS COLS" << intersectionSource.rows << " " << intersectionSource.cols << "\n";
+        for(int m=0; m < intersectionSource.rows; m++) {
+            for(int n=0; n < intersectionSource.cols; n++) {
+
+                if( intersectionSource.at<uchar>(m,n) > 150 ) {
+                    sourceFiltered(n,m) = sourceCloud->at(n,m);
+                }
+                if( intersectionTarget.at<uchar>(m,n) > 150 ) {
+                    targetFiltered(n,m) = targetCloud->at(n,m);
+                }
+
+            }
+        }
+
+
+        static std::string id("a");
+        std::string name=std::string("rotated")+id+std::string(".jpg");
+        //    imwrite(name.c_str(),outMat);
+        std::string name2=std::string("finalSrc")+id+std::string(".jpg");
+        std::string name3=std::string("finalTgt")+id+std::string(".jpg");
+        std::string name4=std::string("sobelSrc")+id+std::string(".jpg");
+        std::string name5=std::string("sobelTgt")+id+std::string(".jpg");
+        std::string name6=std::string("rotated22")+id+std::string(".jpg");
+        imwrite(name.c_str(),movedSource);
+        imwrite(name2.c_str(),intersectionSource);
+        imwrite(name3.c_str(),intersectionTarget);
+        imwrite(name4.c_str(),sourceBorders);
+        imwrite(name5.c_str(),targetBorders);
+        if( id=="a") id="b";
+        else if( id=="b") id="a";
+
+    }
 }
 #endif // PCL_FILTERS_BILATERAL_H_

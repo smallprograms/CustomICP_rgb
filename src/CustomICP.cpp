@@ -2,6 +2,7 @@
 #include "SobelFilter.h"
 #include "time.h"
 #include <stdlib.h>
+#include <cmath>
 
 CustomICP::CustomICP()
 {
@@ -36,6 +37,57 @@ void CustomICP::setInputTarget( pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt ) {
 
 }
 
+inline float photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::PointCloud<pcl::PointXYZRGB> &cloudTgt,Eigen::Matrix4f transf) {
+    pcl::PointCloud<pcl::PointXYZRGB> srcMoved(640,480);
+    pcl::transformPointCloud(cloudSrc, srcMoved, transf);
+
+    float fx = 525.0;  // focal length x
+    float fy = 525.0;  // focal length y
+    float cx = 319.5;  // optical center x
+    float cy = 239.5;  // optical center y
+
+    float factor = 5000; // for the 16-bit PNG files
+
+    float diff = 0;
+    int count=0;
+    for(int i=0; i < srcMoved.height; i++) {
+        for(int j=0; j < srcMoved.width; j++) {
+
+             if( std::isnan(srcMoved(j,i).x) == false && srcMoved(j,i).z > 0.01) {
+
+                float z = srcMoved(j,i).z;
+                float x = srcMoved(j,i).x;
+                float y = srcMoved(j,i).y;
+
+                float rowf= (y*fy)/z+cy;
+                float colf = (x*fx)/z+cx;
+                //aprox to nearest int
+                int row = rowf+0.5;
+                int col = colf+0.5;
+
+                if( col > 639 ) col = 639;
+                if( row > 479 ) row = 479;
+                if( col < 0 )   col = 0;
+                if( row < 0 )   row = 0;
+
+                float colorDiff = ( srcMoved(j,i).b - cloudTgt(col,row).b )* ( srcMoved(j,i).b - cloudTgt(col,row).b );
+                colorDiff += ( srcMoved(j,i).g - cloudTgt(col,row).g )* ( srcMoved(j,i).g - cloudTgt(col,row).g );
+                colorDiff += ( srcMoved(j,i).r - cloudTgt(col,row).r )* ( srcMoved(j,i).r - cloudTgt(col,row).r );
+                colorDiff = std::sqrt(colorDiff);
+                diff += colorDiff;
+                count++;
+             }
+
+        }
+    }
+
+    if( count !=0 ) {
+        return diff/count;
+    } else {
+        return 1000;
+    }
+}
+
 void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
 {
     /**/
@@ -43,7 +95,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     float maxCorrespDist = 0.05;
     //optical flow to calculate initial transformation
     oflowTransf = getOflow3Dtransf(src,tgt,maxCorrespDist);
-    /*
+
     //try to obtain optical flow relaxing parameters
     while( oflowTransf == Eigen::Matrix4f::Identity() && maxCorrespDist < 0.2 ) {
         maxCorrespDist = maxCorrespDist + 0.05;
@@ -73,6 +125,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     //oflowTransf = Eigen::Matrix4f::Identity();
     pcl::PointCloud<pcl::PointXYZRGB> sobTgt(640,480);
     pcl::PointCloud<pcl::PointXYZRGB> sobSrc(640,480);
+    pcl::PointCloud<pcl::PointXYZRGB> sobSrcMoved(640,480);
 
 
     sobFilter.setSourceCloud(src);
@@ -102,24 +155,25 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
         }
     }
     //std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
-
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());
     icp.align(cloud,oflowTransf);
     finalTransf = icp.getFinalTransformation();
-
     //use just optical flow transformation, without using ICP
     /**
     std::cout << "USING ONLY OFL00W \n";
     finalTransf = oflowTransf;
     /**/
     //correspondences = customCorresp->getCorrespondences();
-    fitness = icp.getFitnessScore(); //segfault if you call this methoud without called icp.align first
+    //Sfitness = icp.getFitnessScore(); //segfault if you call this methoud without called icp.align first
 
     /** SECOND ICP WITH DIFFERENT MAX DISTANCE*/
-    icp.setMaxCorrespondenceDistance(0.03);
+    icp.setMaxCorrespondenceDistance(0.05);
     icp.align(cloud, finalTransf);
     finalTransf = icp.getFinalTransformation();
+
+//    pcl::transformPointCloud(sobSrc,sobSrcMoved,finalTransf);
+//    pcl::io::savePCDFileASCII("sobSrcMoved.pcd",sobSrcMoved);
 //    correspondences = customCorresp->getCorrespondences();
 
 //    icp.setMaxCorrespondenceDistance(0.0075);
@@ -131,7 +185,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     /** SECOND ICP WITH POINTS DOWNSAMPLED
     pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icpFull;
     //icpFull.setMaxCorrespondenceDistance(0.025); //21 oct
-    icpFull.setMaxCorrespondenceDistance(0.1);
+    icpFull.setMaxCorrespondenceDistance(0.03);
     icpFull.setEuclideanFitnessEpsilon(1e-4);
     icpFull.setMaximumIterations(10);
     pcl::PointCloud<pcl::PointXYZRGB>  srcFull;
@@ -140,20 +194,35 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     pcl::PointCloud<pcl::PointXYZRGB>  tgtDS;
 
     std::vector<int> indices;
-    pcl::removeNaNFromPointCloud(*tgt,tgtFull, indices);
-    pcl::removeNaNFromPointCloud(*src,srcFull, indices);
+//    pcl::removeNaNFromPointCloud(*tgt,tgtFull, indices);
+//    pcl::removeNaNFromPointCloud(*src,srcFull, indices);
+
+    for(int k=0; k < tgt->size(); k++) {
+        if( std::isnan(tgt->points[k].x) == false && tgt->points[k].z > 0.01) {
+            tgtFull.push_back(tgt->at(k));
+        }
+    }
+
+    for(int k=0; k < src->size(); k++) {
+        if( std::isnan(src->points[k].x) == false && src->points[k].z > 0.01 ) {
+            srcFull.push_back(src->at(k));
+        }
+    }
+    std::cout << "No NAN size: " << tgtFull.size() << "\n";
     //Downsample
-    voxelFilter.setLeafSize(0.005,0.005,0.005);
-    voxelFilter.setInputCloud(tgtFull.makeShared());
-    voxelFilter.filter(tgtDS);
-    voxelFilter.setInputCloud(srcFull.makeShared());
-    voxelFilter.filter(srcDS);
-    std::cout << "ICP0.1 DOWNSAMPLED SIZE: " << tgtDS.size() << "\n";
-    //apply ICP to downsampled clouds
-    icpFull.setInputSource(srcDS.makeShared());
-    icpFull.setInputTarget(tgtDS.makeShared());
-    icpFull.align(cloud,finalTransf);
-    finalTransf = icpFull.getFinalTransformation();
+//    voxelFilter.setLeafSize(0.0015,0.0015,0.0015);
+//    voxelFilter.setInputCloud(tgtFull.makeShared());
+//    voxelFilter.filter(tgtDS);
+//    voxelFilter.setInputCloud(srcFull.makeShared());
+//    voxelFilter.filter(srcDS);
+//    std::cout << "ICP0.1 DOWNSAMPLED SIZE: " << tgtDS.size() << "\n";
+//    //apply ICP to downsampled clouds
+//    icpFull.setInputSource(srcDS.makeShared());
+//    icpFull.setInputTarget(tgtDS.makeShared());
+//    icpFull.align(cloud,finalTransf);
+//    finalTransf = icpFull.getFinalTransformation();
+
+//    std::cout << "C:" << photoConsistency(*src,*tgt,finalTransf) << "\n";
 
     //apply ICP to full clouds
     icpFull.setMaxCorrespondenceDistance(0.05);
@@ -163,9 +232,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     icpFull.setInputTarget(tgtFull.makeShared());
     icpFull.align(cloud,finalTransf);
     finalTransf = icpFull.getFinalTransformation();
-
-
-
+    std::cout << "D:" << photoConsistency(*src,*tgt,finalTransf) << "\n";
 
     /**/
 
@@ -346,6 +413,16 @@ void CustomICP::randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDi
 
     finalTransf = bestTransf;
 
+}
+
+float CustomICP::getPhotoConsistency()
+{
+    return photoConsistency(*src,*tgt,finalTransf);
+}
+
+float CustomICP::getPhotoConsistency(Eigen::Matrix4f ctransf)
+{
+    return photoConsistency(*src,*tgt,ctransf);
 }
 
 

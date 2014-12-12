@@ -1,6 +1,7 @@
 #define ENABLE_DEBUG_G2O 0 //Don't enable if not necessary
 
 #include "GraphOptimizer_G2O.h"
+#include "PhotoEdge.h"
 
 #if ENABLE_DEBUG_G2O
 #include "../include/Miscellaneous.h" //Save matrix
@@ -26,7 +27,7 @@ GraphOptimizer_G2O::GraphOptimizer_G2O()
     vertexIdx=0;
 }
 
-int GraphOptimizer_G2O::addVertex(Eigen::Matrix4d& vertexPose)
+int GraphOptimizer_G2O::addVertex(Eigen::Matrix4d& vertexPose, int id, bool isFixed)
 {
     static double yaw,pitch,roll;
 
@@ -58,21 +59,18 @@ int GraphOptimizer_G2O::addVertex(Eigen::Matrix4d& vertexPose)
     cam.translation() = t;
 
     vc->setEstimate(cam);
-    vc->setId(vertexIdx);      // vertex id
+    vc->setId(id);      // vertex id
 
-    // set first pose fixed
-    if (vertexIdx==0){
+    //set pose fixed
+    if (isFixed) {
         vc->setFixed(true);
     }
 
     // add to optimizer
     optimizer.addVertex(vc);
+    vertexIdVec.push_back(id);
 
-    //Update vertex index
-    vertexIdx++;
-
-    //Return the added vertex index
-    return vertexIdx-1;
+    return id;
 }
 
 void GraphOptimizer_G2O::addEdge(const int fromIdx,
@@ -112,10 +110,12 @@ void GraphOptimizer_G2O::addEdge(const int fromIdx,
     g2o::SE3Quat transf(q,t);	// relative transformation
 
     g2o::EdgeSE3* edge = new g2o::EdgeSE3;
+    //g2o::PhotoEdge* edge = new g2o::PhotoEdge;
     edge->vertices()[0] = optimizer.vertex(fromIdx);
     edge->vertices()[1] = optimizer.vertex(toIdx);
     edge->setMeasurement(transf);
-
+//    edge->setOffset(offset); //to recover cloud id
+//    edge->setCloudsPath(cloudsPath); //place where point clouds are in hd
     //Set the information matrix to identity
     edge->setInformation(informationMatrix);
 
@@ -141,12 +141,18 @@ void GraphOptimizer_G2O::optimizeGraph()
 void GraphOptimizer_G2O::getPoses(std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f > >& poses)
 {
     poses.clear();
-    poses.resize(vertexIdx);
+    bool firstVertex=false;
+    for( int k=1; ; k++) {
 
-    for(int poseIdx=0;poseIdx<vertexIdx;poseIdx++)
-    {
+
         //Transform the vertex pose from G2O quaternion to Eigen::Matrix4f
-     	g2o::VertexSE3* vertex = dynamic_cast<g2o::VertexSE3*>(optimizer.vertex(poseIdx));
+        g2o::VertexSE3* vertex = dynamic_cast<g2o::VertexSE3*>(optimizer.vertex( k ));
+        if( vertex != NULL ) {
+            firstVertex = true;
+        } else {
+            if( firstVertex || k > 100000 ) break;
+            continue;
+        }
         double optimizedPoseQuaternion[7];
         vertex->getEstimateData(optimizedPoseQuaternion);
 
@@ -180,7 +186,8 @@ void GraphOptimizer_G2O::getPoses(std::vector<Eigen::Matrix4f, Eigen::aligned_al
         optimizedPose(3,3)=1;
 
         //Set the optimized pose to the vector of poses
-        poses[poseIdx]=optimizedPose;
+        //poses[k]=optimizedPose;
+        poses.push_back(optimizedPose);
     }
 }
 
@@ -190,7 +197,16 @@ void GraphOptimizer_G2O::saveGraph(std::string fileName)
     optimizer.save(fileName.c_str(),0);
 }
 
-void GraphOptimizer_G2O::genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt, Eigen::Matrix4f& relPose, Eigen::Matrix<double,6,6>&  infMatrix)
+void GraphOptimizer_G2O::loadGraph(std::string fileName)
+{
+    if( optimizer.load(fileName.c_str()) ) {
+        std::cout << fileName << " LOADED\n\n";
+    } else {
+        std::cout << "FAIL \n\n";
+    }
+}
+
+void GraphOptimizer_G2O::genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt, Eigen::Matrix4f& relPose, Eigen::Matrix<double,6,6>&  infMatrix, float& photoCons)
 {
     CustomICP icp;
     pcl::PointCloud<pcl::PointXYZRGB> notUsed(640,480);
@@ -199,12 +215,12 @@ void GraphOptimizer_G2O::genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src
     icp.setInputTarget(tgt);
     icp.align(notUsed);
     relPose = icp.getFinalTransformation();
-    double fit = icp.getFitnessScore();
-    //std::cout << "fit99999999999----: " << fit << "\n";
-    if( fit > 1 ) fit = 1;
-    fit = 1 - fit;
-    //std::cout << "fit2: " << fit << "\n";
-    infMatrix = Eigen::Matrix<double,6,6>::Identity()*fit;
+    photoCons = icp.getPhotoConsistency();
+    float weight = photoCons;
+    if( weight > 100 ) weight = 100;
+    weight = weight/100;
+    weight = 1 - weight; //1 is perfect, 0 is very bad
+    infMatrix = Eigen::Matrix<double,6,6>::Identity()*weight;
 
 }
 

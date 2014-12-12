@@ -170,6 +170,8 @@ public:
     applyFilter (PointCloud &output);
     cv::Mat getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
     cv::Mat getPoints(cv::Mat bordersImage);
+    /** try to remove isolated blobs from image, we want only long borders */
+    void removeNoise(cv::Mat& bordersImage);
     void setCloudAsNaN(pcl::PointCloud<pcl::PointXYZRGB> &cloud);
     void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
     void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
@@ -462,11 +464,11 @@ cv::Mat SobelFilter<PointT>::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& 
         }
     }
 
-    static std::string id("a");
-    std::string name=std::string("sobel_img")+id+std::string(".jpg");
-    imwrite(name.c_str(),imgBorder);
-    if( id=="a") id="b";
-    else if( id=="b") id="a";
+//    static std::string id("a");
+//    std::string name=std::string("sobel_img")+id+std::string(".jpg");
+//    imwrite(name.c_str(),imgBorder);
+//    if( id=="a") id="b";
+//    else if( id=="b") id="a";
 
     return imgBorder;
 }
@@ -499,6 +501,79 @@ cv::Mat SobelFilter<PointT>::getPoints(cv::Mat bordersImage)
     }
 
     return pointMat;
+}
+
+inline bool hasSomeNeighBoor(const cv::Mat& img,int row, int col, int dist) {
+    if( img.at<uchar>(row+dist,col) > 150 ) return true;
+    if( img.at<uchar>(row-dist,col) > 150 ) return true;
+    if( img.at<uchar>(row,col+dist) > 150 ) return true;
+    if( img.at<uchar>(row,col-dist) > 150 ) return true;
+    if( img.at<uchar>(row+dist,col+dist) > 150 ) return true;
+    if( img.at<uchar>(row+dist,col-dist) > 150 ) return true;
+    if( img.at<uchar>(row-dist,col+dist) > 150 ) return true;
+    if( img.at<uchar>(row-dist,col-dist) > 150 ) return true;
+
+    return false;
+}
+
+inline std::vector<cv::Point2i> generateNeighBoor(const cv::Mat& bordersImage,const cv::Mat& visitedImage, int row, int col) {
+
+    //point.x=row, point.y=column
+    std::vector<cv::Point2i> toVisit;
+    const int dist = 1;
+    if( bordersImage.at<uchar>(row+dist,col) > 150 && visitedImage.at<uchar>(row+dist,col) == 0 ) toVisit.push_back(cv::Point2i(row+dist,col));
+    if( bordersImage.at<uchar>(row-dist,col) > 150 && visitedImage.at<uchar>(row-dist,col) == 0 ) toVisit.push_back(cv::Point2i(row-dist,col));
+    if( bordersImage.at<uchar>(row,col+dist) > 150 && visitedImage.at<uchar>(row,col+dist) == 0 ) toVisit.push_back(cv::Point2i(row,col+dist));
+    if( bordersImage.at<uchar>(row,col-dist) > 150 && visitedImage.at<uchar>(row,col-dist) == 0 ) toVisit.push_back(cv::Point2i(row,col-dist));
+    if( bordersImage.at<uchar>(row+dist,col+dist) > 150 && visitedImage.at<uchar>(row+dist,col+dist) == 0 ) toVisit.push_back(cv::Point2i(row+dist,col+dist));
+    if( bordersImage.at<uchar>(row+dist,col-dist) > 150 && visitedImage.at<uchar>(row+dist,col-dist) == 0 ) toVisit.push_back(cv::Point2i(row+dist,col-dist));
+    if( bordersImage.at<uchar>(row-dist,col+dist) > 150 && visitedImage.at<uchar>(row-dist,col+dist) == 0 ) toVisit.push_back(cv::Point2i(row-dist,col+dist));
+    if( bordersImage.at<uchar>(row-dist,col-dist) > 150 && visitedImage.at<uchar>(row-dist,col-dist) == 0 ) toVisit.push_back(cv::Point2i(row-dist,col-dist));
+
+    return toVisit;
+
+}
+
+
+inline void visitNeighBoor(std::vector<cv::Point2i> neighBoor, const cv::Mat& bordersImage,cv::Mat& visitedImage,cv::Mat& localImage, int& count ) {
+    for( int k=0; k<neighBoor.size(); k++ ) {
+        visitedImage.at<uchar>(neighBoor.at(k).x,neighBoor.at(k).y) = 255;
+        localImage.at<uchar>(neighBoor.at(k).x,neighBoor.at(k).y) = 255;
+        count++;
+        std::vector<cv::Point2i> toVisit = generateNeighBoor(bordersImage,visitedImage,neighBoor.at(k).x,neighBoor.at(k).y);
+        visitNeighBoor(toVisit,bordersImage,visitedImage,localImage,count);
+    }
+}
+
+template <typename PointT>
+void SobelFilter<PointT>::removeNoise(cv::Mat& bordersImage) {
+
+    cv::Mat visitedImage=cv::Mat::zeros(bordersImage.rows,bordersImage.cols,bordersImage.type());
+    cv::Mat finalImage=cv::Mat::zeros(bordersImage.rows,bordersImage.cols,bordersImage.type());
+
+
+    for(int row=0; row < bordersImage.rows; row++) {
+        for(int col=0; col < bordersImage.cols; col++) {
+
+            if( bordersImage.at<uchar>(row,col) > 150 && visitedImage.at<uchar>(row,col) == 0 ) {
+
+                int count=0;
+                cv::Mat localImage=cv::Mat::zeros(bordersImage.rows,bordersImage.cols,bordersImage.type());
+
+                visitedImage.at<uchar>(row,col) = 255;
+                localImage.at<uchar>(row,col) = 255;
+                count++;
+                std::vector<cv::Point2i> toVisit = generateNeighBoor(bordersImage,visitedImage,row,col);
+                visitNeighBoor(toVisit,bordersImage,visitedImage,localImage,count);
+
+                if( count > 100 ) {
+                    cv::bitwise_or(localImage,finalImage,finalImage);
+                }
+            }
+        }
+    }
+
+    bordersImage = finalImage;
 }
 
 template <typename PointT>
@@ -579,7 +654,6 @@ SobelFilter<PointT>::runICP(cv::Mat src, cv::Mat tgt, int maxIter,std::vector<in
     Affine.at<float>(1,1) = R.at<float>(1,1);
     Affine.at<float>(0,2) = T(0);
     Affine.at<float>(1,2) = T(1);
-    std::cout << "AFINE:\n" << Affine << "\n";
     return Affine;
 }
 
@@ -592,7 +666,6 @@ SobelFilter<PointT>::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFilter
     cv::Mat sourceBorders = getBorders(sourceCloud);
     cv::Mat targetBorders = getBorders(targetCloud);
     cv::Mat transf = cv::estimateRigidTransform(sourceBorders,targetBorders,false);
-    std::cout << transf << "\n";
 
     if( transf.rows == 0 ) {
 
@@ -615,15 +688,25 @@ SobelFilter<PointT>::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFilter
         cv::Mat movedSource;
         cv::Mat intersectionTarget;
         cv::Mat intersectionSource;
-        //    //apply rotation and translation ot image
+        //apply rotation and translation ot image
         cv::warpAffine(sourceBorders, movedSource, transf, cv::Size(sourceBorders.cols,sourceBorders.rows));
         cv::bitwise_and(movedSource,targetBorders,intersectionTarget);
+
+        static bool writeImage=true;
+        if( writeImage )
+            cv::imwrite("before_filter.jpg",intersectionTarget);
+
+        removeNoise(intersectionTarget);
+
+
+        if( writeImage ){
+            cv::imwrite("after_filter.jpg",intersectionTarget);
+            writeImage = false;
+        }
         cv::Mat AffineInv;
         cv::invertAffineTransform(transf,AffineInv);
-        std::cout << AffineInv << "\n";
         cv::warpAffine(intersectionTarget, intersectionSource, AffineInv, cv::Size(sourceBorders.cols,sourceBorders.rows));
 
-        std::cout << "ROWS COLS" << intersectionSource.rows << " " << intersectionSource.cols << "\n";
         for(int m=0; m < intersectionSource.rows; m++) {
             for(int n=0; n < intersectionSource.cols; n++) {
 
@@ -638,21 +721,21 @@ SobelFilter<PointT>::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFilter
         }
 
 
-        static std::string id("a");
-        std::string name=std::string("rotated")+id+std::string(".jpg");
-        //    imwrite(name.c_str(),outMat);
-        std::string name2=std::string("finalSrc")+id+std::string(".jpg");
-        std::string name3=std::string("finalTgt")+id+std::string(".jpg");
-        std::string name4=std::string("sobelSrc")+id+std::string(".jpg");
-        std::string name5=std::string("sobelTgt")+id+std::string(".jpg");
-        std::string name6=std::string("rotated22")+id+std::string(".jpg");
-        imwrite(name.c_str(),movedSource);
-        imwrite(name2.c_str(),intersectionSource);
-        imwrite(name3.c_str(),intersectionTarget);
-        imwrite(name4.c_str(),sourceBorders);
-        imwrite(name5.c_str(),targetBorders);
-        if( id=="a") id="b";
-        else if( id=="b") id="a";
+//        static std::string id("a");
+//        std::string name=std::string("rotated")+id+std::string(".jpg");
+//        //    imwrite(name.c_str(),outMat);
+//        std::string name2=std::string("finalSrc")+id+std::string(".jpg");
+//        std::string name3=std::string("finalTgt")+id+std::string(".jpg");
+//        std::string name4=std::string("sobelSrc")+id+std::string(".jpg");
+//        std::string name5=std::string("sobelTgt")+id+std::string(".jpg");
+//        std::string name6=std::string("rotated22")+id+std::string(".jpg");
+//        imwrite(name.c_str(),movedSource);
+//        imwrite(name2.c_str(),intersectionSource);
+//        imwrite(name3.c_str(),intersectionTarget);
+//        imwrite(name4.c_str(),sourceBorders);
+//        imwrite(name5.c_str(),targetBorders);
+//        if( id=="a") id="b";
+//        else if( id=="b") id="a";
 
     }
 }

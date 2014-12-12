@@ -30,6 +30,8 @@ public:
     void setOflowStop(bool val);
     bool foundOflowTransf();
     void randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDist, float maxCorDist, float maxFit, int maxIter, float& bestFit, int& numCorresp);
+    float getPhotoConsistency();
+    float getPhotoConsistency(Eigen::Matrix4f ctransf);
 
 private:
     //use our custom correspondences estimator

@@ -39,6 +39,8 @@ offset is summed to vertex indexs in order to know point cloud id!*/
   /*!load the graph from  file.*/
   void loadGraph(std::string fileName);
   /*!Generate relPose and information matrix.*/
-  void genEdgeData(pcl::PointCloud<pcl::PointXYZRGB>::Ptr src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt,Eigen::Matrix4f& relPose,Eigen::Matrix<double,6,6>& infMatrix, float& photoCons);
+  void genEdgeData(Eigen::Matrix4f guess,pcl::PointCloud<pcl::PointXYZRGB>::Ptr src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt,
+                   Eigen::Matrix4f& relPose,Eigen::Matrix<double,6,6>& infMatrix, float& photoCons);
+  void fillInformationMatrix(Eigen::Matrix<double,6,6>&  infMatrix, float photoCons);
 
 };

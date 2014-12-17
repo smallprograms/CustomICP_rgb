@@ -5,20 +5,9 @@
 #include <pcl/point_types.h>
 #include "opencv2/opencv.hpp"
 #include "oflow_pcl.h"
+#include "utils.h"
 
 
-void cloudToMat(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, cv::Mat& outMat){
-
-    for(int w=0; w < cloud->width; w++) {
-        for( int h=0; h < cloud->height; h++) {
-
-                outMat.at<cv::Vec3b>(h,w)[0] = (*cloud)(w,h).b;
-                outMat.at<cv::Vec3b>(h,w)[1] = (*cloud)(w,h).g;
-                outMat.at<cv::Vec3b>(h,w)[2] = (*cloud)(w,h).r;
-         }
-    }
-
-}
 
 bool pointExists(const pcl::PointCloud<pcl::PointXYZ>& cornersCloudA, const pcl::PointXYZ& point) {
     for(int p=0; p < cornersCloudA.size(); p++) {

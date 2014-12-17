@@ -45,6 +45,7 @@
 #include "opencv2/flann/flann.hpp"
 #include "opencv2/flann/flann_base.hpp"
 #include "oflow_pcl.h"
+#include "utils.h"
 
 #define MIN3(x,y,z)  ((y) <= (z) ? \
     ((x) <= (y) ? (x) : (y)) \

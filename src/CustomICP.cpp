@@ -88,14 +88,13 @@ inline float photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::
     }
 }
 
-void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
+void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess )
 {
-    /**/
+    /**
     //for max 3D distance of projected optical flow correspondences
     float maxCorrespDist = 0.05;
     //optical flow to calculate initial transformation
     oflowTransf = getOflow3Dtransf(src,tgt,maxCorrespDist);
-
     //try to obtain optical flow relaxing parameters
     while( oflowTransf == Eigen::Matrix4f::Identity() && maxCorrespDist < 0.2 ) {
         maxCorrespDist = maxCorrespDist + 0.05;
@@ -128,9 +127,9 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     pcl::PointCloud<pcl::PointXYZRGB> sobSrcMoved(640,480);
 
 
-    sobFilter.setSourceCloud(src);
-    sobFilter.setTargetCloud(tgt);
-    sobFilter.applyFilter(sobSrc,sobTgt);
+    edgeFilter.setSourceCloud(src);
+    edgeFilter.setTargetCloud(tgt);
+    edgeFilter.applyFilter(sobSrc,sobTgt);
 
     static bool saveSobel=true;
     if( saveSobel ) {
@@ -157,7 +156,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud )
     //std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());
-    icp.align(cloud,oflowTransf);
+    icp.align(cloud, guess);
     finalTransf = icp.getFinalTransformation();
     //use just optical flow transformation, without using ICP
     /**
@@ -423,6 +422,11 @@ float CustomICP::getPhotoConsistency()
 float CustomICP::getPhotoConsistency(Eigen::Matrix4f ctransf)
 {
     return photoConsistency(*src,*tgt,ctransf);
+}
+
+float CustomICP::getPhotoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudA, pcl::PointCloud<pcl::PointXYZRGB> &cloudB, Eigen::Matrix4f ctransf)
+{
+    return photoConsistency(cloudA,cloudB,ctransf);
 }
 
 

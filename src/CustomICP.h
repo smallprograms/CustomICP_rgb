@@ -12,6 +12,7 @@
 #include "BilateralFilter.h"
 #include <pcl/filters/fast_bilateral.h>
 #include "SobelFilter.h"
+#include "EdgeFilter.h"
 #include <unsupported/Eigen/SparseExtra>
 
 class CustomICP
@@ -20,7 +21,7 @@ public:
     CustomICP();
     void setInputSource(pcl::PointCloud<pcl::PointXYZRGB>::Ptr src);
     void setInputTarget(pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt);
-    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud);
+    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess);
     Eigen::Matrix4f getFinalTransformation();
     pcl::Correspondences getCorrespondences();
     pcl::PointCloud<pcl::PointXYZRGB> getSourceFiltered();
@@ -32,11 +33,13 @@ public:
     void randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDist, float maxCorDist, float maxFit, int maxIter, float& bestFit, int& numCorresp);
     float getPhotoConsistency();
     float getPhotoConsistency(Eigen::Matrix4f ctransf);
+    float getPhotoConsistency(pcl::PointCloud<pcl::PointXYZRGB>& cloudA,pcl::PointCloud<pcl::PointXYZRGB>& cloudB,Eigen::Matrix4f ctransf);
 
 private:
     //use our custom correspondences estimator
     CustomCorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float>* customCorresp;
     SobelFilter<pcl::PointXYZRGB> sobFilter;
+    EdgeFilter edgeFilter;
     pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr src;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt;

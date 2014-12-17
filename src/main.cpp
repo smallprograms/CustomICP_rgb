@@ -3,11 +3,10 @@
 #include <cmath>
 #include "CustomICP.h"
 #include "GraphOptimizer_G2O.h"
+#include "Surf.h"
 #include "BashUtils.h"
 #include "opencv2/core/core.hpp"
-#include "opencv2/features2d/features2d.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/nonfree/features2d.hpp"
+
 
 //flag used to press a key to process next capture
 bool doNext = false;
@@ -15,8 +14,6 @@ bool saveAndQuit = false;
 bool loadedGlobal = false;
 std::map<int,Eigen::Matrix4f> poseMap;
 
-std::map<int,std::vector<cv::KeyPoint> > cloudKeyPoints;
-std::map<int,cv::Mat>  cloudDescriptors;
 std::map<int,pcl::PointCloud<pcl::PointXYZRGB> >  cloudMap;
 
 bool readCloud(int index, char* path, pcl::PointCloud<pcl::PointXYZRGB>& cloud);
@@ -448,109 +445,40 @@ bool saveCloudImage(const pcl::PointCloud<pcl::PointXYZRGB>& cloud, std::string 
 
 }
 
-/** save keypoints and descriptors of each cloud in two std::maps */
-void saveCloudDescriptors(int cloudIndex, const pcl::PointCloud<pcl::PointXYZRGB>& cloudA) {
-
-    using namespace cv;
-    cv::Mat imgAcolor(480,640,CV_8UC3);
-    cloudToMat(cloudA.makeShared(),imgAcolor);
-
-    cv::Mat img_1(480,640,CV_8UC1);
-    cv::cvtColor(imgAcolor,img_1,CV_BGR2GRAY);
-
-    //-- Step 1: Detect the keypoints using SURF Detector
-    int minHessian = 400;
-
-    SurfFeatureDetector detector( minHessian );
-    detector.upright = true;
+Eigen::Matrix4f getBestGuess(CustomICP& icp, Surf& surf, const int indexA, const int indexB,pcl::PointCloud<pcl::PointXYZRGB> &cloudA,pcl::PointCloud<pcl::PointXYZRGB> &cloudB, float& photoCons) {
 
 
-    std::vector<KeyPoint> keypoints_1;
-    detector.detect( img_1, keypoints_1 );
+    Eigen::Matrix4f guess2 = getOflow3Dtransf(cloudA.makeShared(),cloudB.makeShared(),0.05);
 
-    cloudKeyPoints[cloudIndex] = keypoints_1;
+    float oflowP = icp.getPhotoConsistency(cloudA,cloudB,guess2);
 
-    //-- Step 2: Calculate descriptors (feature vectors)
-    SurfDescriptorExtractor extractor;
-    Mat descriptors_1;
-    extractor.compute( img_1, keypoints_1, descriptors_1 );
+    float GOOD_PHOTOCONS=20;
+    //avoid to calculate SURF, this is good aproximation!
+    if( oflowP < GOOD_PHOTOCONS ) {
+        photoCons = oflowP;
+        return guess2;
+    }
 
-    cloudDescriptors[cloudIndex] = descriptors_1;
+    Eigen::Matrix4f guess1 = surf.getSurfTransform(indexA,indexB,cloudA,cloudB);
+    float surfP = icp.getPhotoConsistency(cloudA,cloudB,guess1);
+
+    if( surfP < oflowP ) {
+        photoCons = surfP;
+        return guess1;
+
+
+    } else {
+        photoCons = oflowP;
+        return guess2;
+    }
 }
-
-/** uses SURF for comparison of two clouds, saves the feature distance in featureDist parameter and detected points pixel distance in pixelDist paramter **/
-void visualDistance( const int indexA, const int indexB,const pcl::PointCloud<pcl::PointXYZRGB>& cloudA,const pcl::PointCloud<pcl::PointXYZRGB>& cloudB, float& featureDist, int& pixelDist ) {
-
-    using namespace cv;
-    //calculate descriptors if we dont have them
-    if( cloudKeyPoints.find(indexA) == cloudKeyPoints.end() ) {
-        saveCloudDescriptors(indexA,cloudA);
-    }
-    if( cloudKeyPoints.find(indexB) == cloudKeyPoints.end() ) {
-        saveCloudDescriptors(indexB,cloudB);
-    }
-
-    std::vector<KeyPoint> keypoints_1, keypoints_2;
-    keypoints_1 = cloudKeyPoints[indexA];
-
-    keypoints_2 = cloudKeyPoints[indexB];
-
-    Mat descriptors_1, descriptors_2;
-    descriptors_1 = cloudDescriptors[indexA];
-    descriptors_2 = cloudDescriptors[indexB];
-
-    //-- Step 3: Matching descriptor vectors using FLANN matcher
-    FlannBasedMatcher matcher;
-
-    std::vector< DMatch > matches;
-    matcher.match( descriptors_1, descriptors_2, matches );
-
-    double max_dist = 0; double min_dist = 100;
-    double mean_dist = 0;
-    //-- Quick calculation of max and min distances between keypoints
-    for( int i = 0; i < descriptors_1.rows; i++ )
-    { double dist = matches[i].distance;
-        if( dist < min_dist ) min_dist = dist;
-        if( dist > max_dist ) max_dist = dist;
-        mean_dist += dist;
-
-    }
-
-    mean_dist = mean_dist/descriptors_1.rows;
-
-    featureDist = mean_dist;
-
-    //calculation of distance in pixels between best matches
-    std::vector< DMatch > good_matches;
-
-    for( int i = 0; i < descriptors_1.rows; i++ )
-    {
-        if( matches[i].distance <= max(2*min_dist, 0.02) )
-        { good_matches.push_back( matches[i]); }
-    }
-
-    int img_dist=0;
-    for( int m =0; m < good_matches.size(); m++) {
-        int d=0;
-        int m1 = good_matches.at(m).queryIdx;
-        int m2 = good_matches.at(m).trainIdx;
-
-        d += (keypoints_1.at(m1).pt.x - keypoints_2.at(m2).pt.x)*(keypoints_1.at(m1).pt.x - keypoints_2.at(m2).pt.x);
-        d += (keypoints_1.at(m1).pt.y - keypoints_2.at(m2).pt.y)*(keypoints_1.at(m1).pt.y - keypoints_2.at(m2).pt.y);
-        img_dist += std::sqrt(d);
-    }
-
-    img_dist = img_dist/good_matches.size();
-
-    pixelDist = img_dist;
-}
-
 
 /** loads different captures (.pcd files), align them with customICP and write them aligned in a single file (outFile) **/
 void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int min, int max, char* outFile, char* global ) {
 
     CustomICP icp;
     GraphOptimizer_G2O optimizer;
+    Surf surf;
     pcl::FastBilateralFilter<pcl::PointXYZRGB> fastBilFilter;
     pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
     voxelFilter.setLeafSize(0.01,0.01,0.01);
@@ -590,7 +518,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         return;
     }
 
-    saveCloudDescriptors(min,prevCloud);
     fastBilFilter.setInputCloud(prevCloud.makeShared());
     fastBilFilter.filter(prevCloud);
 
@@ -637,7 +564,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
     //save last transforms!
     std::deque< Eigen::Matrix4f > transfQueue;
     const int TQUEUE_SIZE=30;
-    transfQueue.resize(TQUEUE_SIZE);
 
     //read file by file, save and quit if user press s
     for(int i=min+1; i <= max && saveAndQuit == false; i++) {
@@ -653,7 +579,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 std::cout << "Reading end at " << i << "\n";
                 break;
             }
-            saveCloudDescriptors(i,currCloud);
+
 
             std::cout << "READED consecutiv: " << i << "\n";
             /** end read next cloud **/
@@ -673,11 +599,15 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
             //start ICP
             icp.setInputSource(currCloud.makeShared());
             icp.setInputTarget(prevCloud.makeShared());
-            pcl::PointCloud<pcl::PointXYZRGB> finalCloud(640,480);;
-            icp.align (finalCloud);
-            //update global transformation
-            Eigen::Matrix4f icpTransf = icp.getFinalTransformation();
+            pcl::PointCloud<pcl::PointXYZRGB> finalCloud(640,480);
+            float photoCons;
+            Eigen::Matrix4f guess = getBestGuess(icp,surf,i,i-1,currCloud,prevCloud,photoCons);
 
+            //update global transformation
+            Eigen::Matrix4f icpTransf;
+
+            icp.align (finalCloud, guess );
+            icpTransf = icp.getFinalTransformation();
             if( transfQueue.size() > 2 ) {
                 if( transfQueue.size() >= TQUEUE_SIZE ) {
                     transfQueue.pop_front();
@@ -690,7 +620,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
                 for(std::deque<Eigen::Matrix4f>::iterator it=transfQueue.begin();it != transfQueue.end(); it++) {
                     float temp = icp.getPhotoConsistency(*it);
-                    if( temp < currentPhotoCons ) {
+                    temp = temp;
+                    if( (temp+20) < currentPhotoCons ) {
                         std::cout << "improved photo cons! " << currentPhotoCons << ".." << temp << "\n";
                         currentPhotoCons = temp;
                         icpTransf = *it;
@@ -721,7 +652,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 float visualDist;
                 int pixelDist;
 
-                visualDistance(i,prevCloudIndex,currCloud,prevCloud,visualDist,pixelDist);
+                surf.visualDistance(i,prevCloudIndex,currCloud,prevCloud,visualDist,pixelDist);
                 std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
                 std::cout << "currCloud: " <<  i << "prevCloud:" << prevCloudIndex << "\n";
                 std::cout << "Photo cons " << icp.getPhotoConsistency() << "\n";
@@ -738,11 +669,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     //mem leak
                     Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
-                    float photoCons;
-                    //optimizer.genEdgeData(iter->makeShared(),currCloud.makeShared(),*relPose,*infMatrix);
-                    optimizer.genEdgeData(prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
+                    optimizer.genEdgeData(guess,prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
                     if( *relPose != Eigen::Matrix4f::Identity() ) {
-
 
                         optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
                         //save edge on .txt files
@@ -752,7 +680,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
                     //add loop closure edges!
                     /**/
-                    std::cout << "map first key " << poseMap.begin()->first << "\n";
+
                     for( int k=(i-2); k >= poseMap.begin()->first; k=k-1 ) {
                         const float MAX_METERS = 1;
 
@@ -762,7 +690,7 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                             if( readCloud(k,path,pastCloud)  ) {
                                 float visualDist;
                                 int pixelDist;
-                                visualDistance(i,k,currCloud,pastCloud,visualDist,pixelDist);
+                                surf.visualDistance(i,k,currCloud,pastCloud,visualDist,pixelDist);
 //                                std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
 //                                std::cout << "i: " <<  i << "k:" << k << "\n";
                                 if( (visualDist < 0.2 && pixelDist < 75) || (visualDist < 0.35 && pixelDist < 30) ) {
@@ -770,23 +698,23 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                                     Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
                                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
                                     float photoCons;
-                                    optimizer.genEdgeData(pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
+                                    guess = getBestGuess(icp,surf,k,i,pastCloud,currCloud,photoCons);
+                                    if( photoCons < 50 ) {
 
-                                    if( *relPose != Eigen::Matrix4f::Identity() && photoCons < 100 ) {
-
-                                        std::cout << "ADDING LOOP CLOSURE " << k << " - " << i << "\n";
-                                        std::cout << "photoCons:" << photoCons << "\n";
-                                        std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
-                                        optimizer.addEdge(i,k,*relPose,*infMatrix);
-                                        //save edge on .txt files
-                                        writeEdge(i,k,*relPose,*infMatrix,outFile);
+                                        optimizer.genEdgeData(guess,pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
 
 
-                                    } else {
-                                        std::cout << "discarding LOOP CLOSURE " << k << " - " << i << "\n";
-                                        std::cout << "Discarding: " << photoCons << "\n";
-                                        std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n";
-                                        std::cout << "photoCons:" << photoCons << "\n";
+                                        if( *relPose != Eigen::Matrix4f::Identity() && photoCons < 25 ) {
+
+                                            std::cout << "ADDING LOOP CLOSURE " << k << " - " << i << "\n";
+                                            std::cout << "photoCons:" << photoCons << "\n";
+                                            std::cout << "Visual dist: " <<  visualDist << "pixel DIst:" << pixelDist << "\n\n";
+                                            optimizer.addEdge(i,k,*relPose,*infMatrix);
+                                            //save edge on .txt files
+                                            writeEdge(i,k,*relPose,*infMatrix,outFile);
+
+
+                                        }
                                     }
                                 }
                             }

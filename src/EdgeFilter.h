@@ -19,7 +19,7 @@ public:
     void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
     void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
     void applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
-                     pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered);
+                     pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered,int sobelThreshold=50);
 
 private:
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr sourceCloud;
@@ -27,9 +27,9 @@ private:
     size_t win_width;
     size_t win_height;
 
-    cv::Mat getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
+    cv::Mat getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,int sobelThreshold=50);
     cv::Mat getCannyBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
-    cv::Mat getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
+    cv::Mat getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,int sobelThreshold=50);
 
     void visitNeighBoor(std::vector<cv::Point2i> neighBoor, const cv::Mat& bordersImage,
                                     cv::Mat& visitedImage,cv::Mat& localImage, int& count );

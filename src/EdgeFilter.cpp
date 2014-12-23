@@ -16,13 +16,13 @@ void EdgeFilter::setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target)
 }
 
 void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
-                             pcl::PointCloud<pcl::PointXYZRGB>&targetFiltered)
+                             pcl::PointCloud<pcl::PointXYZRGB>&targetFiltered, int sobelThreshold)
 {
     setCloudAsNaN(sourceFiltered);
     setCloudAsNaN(targetFiltered);
     //apply sobel filter to RGB image and get only points with DEPTH not null at depthmap
-    cv::Mat sourceBorders = getBorders(sourceCloud);
-    cv::Mat targetBorders = getBorders(targetCloud);
+    cv::Mat sourceBorders = getBorders(sourceCloud,sobelThreshold);
+    cv::Mat targetBorders = getBorders(targetCloud,sobelThreshold);
     cv::Mat transf = cv::estimateRigidTransform(sourceBorders,targetBorders,false);
 
     if( transf.rows == 0 ) {
@@ -50,17 +50,17 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
         cv::warpAffine(sourceBorders, movedSource, transf, cv::Size(sourceBorders.cols,sourceBorders.rows));
         cv::bitwise_and(movedSource,targetBorders,intersectionTarget);
 
-//        static bool writeImage=true;
-//        if( writeImage )
-//            cv::imwrite("before_filter.jpg",intersectionTarget);
+        static bool writeImage=true;
+        if( writeImage )
+            cv::imwrite("before_filter.jpg",intersectionTarget);
 
-//        removeNoise(intersectionTarget);
+        removeNoise(intersectionTarget);
 
 
-//        if( writeImage ){
-//            cv::imwrite("after_filter.jpg",intersectionTarget);
-//            writeImage = false;
-//        }
+        if( writeImage ){
+            cv::imwrite("after_filter.jpg",intersectionTarget);
+            writeImage = false;
+        }
         cv::Mat AffineInv;
         cv::invertAffineTransform(transf,AffineInv);
         cv::warpAffine(intersectionTarget, intersectionSource, AffineInv, cv::Size(sourceBorders.cols,sourceBorders.rows));
@@ -96,10 +96,14 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
 //        else if( id=="b") id="a";
 
     }
+
+    removeFarPoints(sourceFiltered,2);
+    removeFarPoints(targetFiltered,2);
+
 }
 
 
-cv::Mat EdgeFilter::getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) {
+cv::Mat EdgeFilter::getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,int sobelThreshold) {
     cv::Mat imgColor(480,640,CV_8UC3);
     cloudToMat(cloud->makeShared(),imgColor);
 
@@ -136,7 +140,7 @@ cv::Mat EdgeFilter::getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &clou
 
     /// Total Gradient (approximate)
     addWeighted( abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad );
-    threshold(grad,grad,25,255,THRESH_BINARY);
+    threshold(grad,grad,sobelThreshold,255,THRESH_BINARY);
 
 //    pcl::PointCloud<pcl::PointXYZRGB> gradCloud(640,480);
 //    setCloudAsNaN(gradCloud);
@@ -181,10 +185,10 @@ cv::Mat EdgeFilter::getCannyBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &clou
     return detected_edges;
 }
 
-cv::Mat EdgeFilter::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& bordersImage)
+cv::Mat EdgeFilter::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& bordersImage,int sobelThreshold)
 {
     cv::Mat imgBorder = cv::Mat::zeros(480,640,CV_8UC1);
-    cv::Mat rgbBorder = getSobelBorders(bordersImage);
+    cv::Mat rgbBorder = getSobelBorders(bordersImage, sobelThreshold);
 
     for(size_t m=win_width/2+1; m < (bordersImage->width-win_width/2-1); m++) {
         for(size_t n=win_height/2+1; n < (bordersImage->height-win_height/2-1); n++) {
@@ -244,7 +248,8 @@ void EdgeFilter::removeNoise(cv::Mat& bordersImage) {
     cv::Mat visitedImage=cv::Mat::zeros(bordersImage.rows,bordersImage.cols,bordersImage.type());
     cv::Mat finalImage=cv::Mat::zeros(bordersImage.rows,bordersImage.cols,bordersImage.type());
 
-
+    //let pass blobs that have more than MIN_NEIGHBOORHOOD conected pixels!
+    int MIN_NEIGHBOORHOOD = 1000;
     for(int row=0; row < bordersImage.rows; row++) {
         for(int col=0; col < bordersImage.cols; col++) {
 
@@ -259,7 +264,7 @@ void EdgeFilter::removeNoise(cv::Mat& bordersImage) {
                 std::vector<cv::Point2i> toVisit = generateNeighBoor(bordersImage,visitedImage,row,col);
                 visitNeighBoor(toVisit,bordersImage,visitedImage,localImage,count);
 
-                if( count > 100 ) {
+                if( count > MIN_NEIGHBOORHOOD ) {
                     cv::bitwise_or(localImage,finalImage,finalImage);
                 }
             }

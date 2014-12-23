@@ -6,5 +6,6 @@
 
 void cloudToMat(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, cv::Mat& outMat);
 void setCloudAsNaN(pcl::PointCloud<pcl::PointXYZRGB> &cloud);
+void removeFarPoints(pcl::PointCloud<pcl::PointXYZRGB> &cloud, float z);
 void filterMask(const pcl::PointCloud<pcl::PointXYZRGB>& cloudIn, cv::Mat mask,pcl::PointCloud<pcl::PointXYZRGB> &cloudOut);
 #endif

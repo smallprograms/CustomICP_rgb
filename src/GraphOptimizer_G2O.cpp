@@ -208,13 +208,13 @@ void GraphOptimizer_G2O::loadGraph(std::string fileName)
 void GraphOptimizer_G2O::fillInformationMatrix(Eigen::Matrix<double,6,6>&  infMatrix, float photoCons) {
     float weight = photoCons;
     if( weight < 10 ) weight = 0;
-    if( weight > 60 ) weight = 60;
-    weight = weight/60;
+    if( weight > 150 ) weight = 150;
+    weight = weight/150;
     weight = 1 - weight; //1 is perfect, 0 is very bad
     infMatrix = Eigen::Matrix<double,6,6>::Identity()*weight;
 }
 
-void GraphOptimizer_G2O::genEdgeData(Eigen::Matrix4f guess, pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt, Eigen::Matrix4f& relPose, Eigen::Matrix<double,6,6>&  infMatrix, float& photoCons)
+void GraphOptimizer_G2O::genEdgeData(Eigen::Matrix4f guess, pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt,  Eigen::Matrix4f& relPose, Eigen::Matrix<double,6,6>&  infMatrix, float& photoCons)
 {
     CustomICP icp;
     pcl::PointCloud<pcl::PointXYZRGB> notUsed(640,480);

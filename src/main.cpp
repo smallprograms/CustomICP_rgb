@@ -444,17 +444,23 @@ bool saveCloudImage(const pcl::PointCloud<pcl::PointXYZRGB>& cloud, std::string 
     return false;
 
 }
+/** just check correspondences from A to B */
+Eigen::Matrix4f getBestGuessUnidirectional(CustomICP& icp, Surf& surf, const int indexA, const int indexB,pcl::PointCloud<pcl::PointXYZRGB> &cloudA,pcl::PointCloud<pcl::PointXYZRGB> &cloudB, float& photoCons) {
 
-Eigen::Matrix4f getBestGuess(CustomICP& icp, Surf& surf, const int indexA, const int indexB,pcl::PointCloud<pcl::PointXYZRGB> &cloudA,pcl::PointCloud<pcl::PointXYZRGB> &cloudB, float& photoCons) {
 
+    float maxCorrespDist = 0.05;
+    Eigen::Matrix4f guess2 = getOflow3Dtransf(cloudA.makeShared(),cloudB.makeShared(),maxCorrespDist);
 
-    Eigen::Matrix4f guess2 = getOflow3Dtransf(cloudA.makeShared(),cloudB.makeShared(),0.05);
+    while( guess2 == Eigen::Matrix4f::Identity() && maxCorrespDist < 0.2 ) {
+        maxCorrespDist = maxCorrespDist + 0.05;
+        guess2 = getOflow3Dtransf(cloudA.makeShared(),cloudB.makeShared(),maxCorrespDist);
+    }
 
     float oflowP = icp.getPhotoConsistency(cloudA,cloudB,guess2);
 
     float GOOD_PHOTOCONS=20;
     //avoid to calculate SURF, this is good aproximation!
-    if( oflowP < GOOD_PHOTOCONS ) {
+    if( oflowP < GOOD_PHOTOCONS  ) {
         photoCons = oflowP;
         return guess2;
     }
@@ -462,16 +468,40 @@ Eigen::Matrix4f getBestGuess(CustomICP& icp, Surf& surf, const int indexA, const
     Eigen::Matrix4f guess1 = surf.getSurfTransform(indexA,indexB,cloudA,cloudB);
     float surfP = icp.getPhotoConsistency(cloudA,cloudB,guess1);
 
+
     if( surfP < oflowP ) {
         photoCons = surfP;
         return guess1;
-
 
     } else {
         photoCons = oflowP;
         return guess2;
     }
+
 }
+/** If photoconsistency is bad, calculate transformation from B to A too */
+Eigen::Matrix4f getBestGuess(CustomICP& icp, Surf& surf, const int indexA, const int indexB,pcl::PointCloud<pcl::PointXYZRGB> &cloudA,pcl::PointCloud<pcl::PointXYZRGB> &cloudB, float& photoCons) {
+
+    Eigen::Matrix4f guess = getBestGuessUnidirectional(icp,surf,indexA,indexB,cloudA,cloudB,photoCons);
+
+    if( photoCons > 40 ) {
+        float prevPhotoCons = photoCons;
+        Eigen::Matrix4f guessInverse = getBestGuessUnidirectional(icp,surf,indexB,indexA,cloudB,cloudA,photoCons).inverse();
+        float guessInvPhotoCons =  icp.getPhotoConsistency(guessInverse);
+
+        if( guessInvPhotoCons < prevPhotoCons ) {
+
+            photoCons = guessInvPhotoCons;
+            return guessInverse;
+        } else {
+            photoCons = prevPhotoCons;
+            return guess;
+        }
+    }
+
+    return guess;
+}
+
 
 /** loads different captures (.pcd files), align them with customICP and write them aligned in a single file (outFile) **/
 void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int min, int max, char* outFile, char* global ) {
@@ -535,7 +565,6 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
         globalCloud = prevCloud;
     }
 
-    std::deque< pcl::PointCloud<pcl::PointXYZRGB> > cloudQueue;
     //cloudQueue.resize(4);
     bool showCorrespondences = false;
     int prevCloudIndex;
@@ -608,43 +637,69 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 
             icp.align (finalCloud, guess );
             icpTransf = icp.getFinalTransformation();
-            if( transfQueue.size() > 2 ) {
-                if( transfQueue.size() >= TQUEUE_SIZE ) {
-                    transfQueue.pop_front();
-                }
+
+
+            if( transfQueue.size() >= TQUEUE_SIZE ) {
+                transfQueue.pop_front();
             }
+
 
             float currentPhotoCons = icp.getPhotoConsistency(icpTransf);
 
-            if( currentPhotoCons  > 20 ) {
+            //search previous transformation to see if we have a better photoconsitency
+//            if( currentPhotoCons  > 30 ) {
 
-                for(std::deque<Eigen::Matrix4f>::iterator it=transfQueue.begin();it != transfQueue.end(); it++) {
-                    float temp = icp.getPhotoConsistency(*it);
-                    temp = temp;
-                    if( (temp+20) < currentPhotoCons ) {
-                        std::cout << "improved photo cons! " << currentPhotoCons << ".." << temp << "\n";
-                        currentPhotoCons = temp;
-                        icpTransf = *it;
+//                bool improvedPhotoCons = false;
+//                for(std::deque<Eigen::Matrix4f>::iterator it=transfQueue.begin();it != transfQueue.end(); it++) {
+//                    float temp = icp.getPhotoConsistency(*it);
+//                    temp = temp;
+//                    if( (temp+15) < currentPhotoCons ) {
+//                        std::cout << "improved photo cons! " << currentPhotoCons << ".." << temp << "\n";
+//                        currentPhotoCons = temp;
+//                        icpTransf = *it;
+//                        improvedPhotoCons = true;
+//                    }
+//                }
+//                //run ICP again, initalizing it with the previously found transf
+//                if( improvedPhotoCons ) {
+//                    icp.align(finalCloud, icpTransf);
+//                    icpTransf = icp.getFinalTransformation();
+//                    currentPhotoCons = icp.getPhotoConsistency(icpTransf);
+//                }
+//            }
 
-                    }
-                }
-            }
+            std::cout << "PHOTO CONS: " << currentPhotoCons << "\n";
 
+//            if( currentPhotoCons > 40 ) {
+//                std::cout << "looking ahead " << "\n";
+//                //look ahead to avoid outlayer
+//                for( int k=(i+1); k < (i+5); k=k+1 ) {
+
+//                        pcl::PointCloud<pcl::PointXYZRGB> futureCloud(640,480);
+//                        if( readCloud(k,path,futureCloud)  ) {
+//                            guess = getBestGuess(icp,surf,k,i-1,futureCloud,prevCloud,photoCons);
+//                            icp.setInputSource(futureCloud.makeShared());
+//                            icp.align(finalCloud,guess);
+//                            Eigen::Matrix4f candidateTransf = icp.getFinalTransformation();
+//                            float candidatePhotoCons = icp.getPhotoConsistency();
+//                            if(  candidatePhotoCons < currentPhotoCons ) {
+//                                std::cout << "IMPROVED from FUTURE!! " << currentPhotoCons << " to " << candidatePhotoCons << "\n";
+//                                icpTransf = candidateTransf;
+//                                currentPhotoCons = candidatePhotoCons;
+//                                i=k; //go to future index!
+//                                pcl::copyPointCloud(futureCloud,currCloud);
+//                            }
+
+//                        }
+//                }
+
+//            }
             transfQueue.push_back(icpTransf);
 
-            //round to two decimals
-            icpTransf.col(3)[0] = roundf(icpTransf.col(3)[0]*100.0f)/100.0f;
-            icpTransf.col(3)[1] = roundf(icpTransf.col(3)[1]*100.0f)/100.0f;
-            icpTransf.col(3)[2] = roundf(icpTransf.col(3)[2]*100.0f)/100.0f;
 
             transf = icpTransf.cast<double>() * transf;
-            //round to two decimals
-            transf.col(3)[0] = roundf(((float)transf.col(3)[0])*100.0f)/100.0f;
-            transf.col(3)[1] = roundf(((float)transf.col(3)[1])*100.0f)/100.0f;
-            transf.col(3)[2] = roundf(((float)transf.col(3)[2])*100.0f)/100.0f;
-
+            //convert to quaterion and then go back to rotation matrix
             reorthogonalizeMatrix(transf);
-            //std::cout << "Fitness: " << icp.getFitnessScore() << " - Correspondences: " <<  icp.getCorrespondences().size() << "\n";
 
             /**/
 
@@ -658,23 +713,24 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                 std::cout << "Photo cons " << icp.getPhotoConsistency() << "\n";
             }
 
-            if( showCorrespondences == false ) {
+            if( showCorrespondences == false  ) {
                 int vertexID = optimizer.addVertex(transf,i);
                 writeNumber(i,std::string(outFile)+".vertexId.txt");
                 poseMap[i] = transf.cast<float>();
 
                 if( vertexID > 1 ) {
-                    int fromIndex=vertexID-1;
+                    int toIndex=vertexID-1;
                     //add graph consecutive edges to optimizer
                     //mem leak
                     Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
+                    guess = getBestGuess(icp,surf,i-1,i,prevCloud,currCloud,photoCons);
                     optimizer.genEdgeData(guess,prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
                     if( *relPose != Eigen::Matrix4f::Identity() ) {
 
-                        optimizer.addEdge(vertexID,fromIndex,*relPose,*infMatrix);
+                        optimizer.addEdge(vertexID,toIndex,*relPose,*infMatrix);
                         //save edge on .txt files
-                        writeEdge(vertexID,fromIndex,*relPose,*infMatrix,outFile);
+                        writeEdge(vertexID,toIndex,*relPose,*infMatrix,outFile);
 
                     }
 
@@ -699,12 +755,12 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
                                     float photoCons;
                                     guess = getBestGuess(icp,surf,k,i,pastCloud,currCloud,photoCons);
-                                    if( photoCons < 50 ) {
+                                    if( photoCons < 80 ) {
 
                                         optimizer.genEdgeData(guess,pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
 
 
-                                        if( *relPose != Eigen::Matrix4f::Identity() && photoCons < 25 ) {
+                                        if( *relPose != Eigen::Matrix4f::Identity() && photoCons < 50 ) {
 
                                             std::cout << "ADDING LOOP CLOSURE " << k << " - " << i << "\n";
                                             std::cout << "photoCons:" << photoCons << "\n";

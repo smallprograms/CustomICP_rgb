@@ -21,6 +21,7 @@ public:
     CustomICP();
     void setInputSource(pcl::PointCloud<pcl::PointXYZRGB>::Ptr src);
     void setInputTarget(pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt);
+    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess,int sobelThreshold);
     void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess);
     Eigen::Matrix4f getFinalTransformation();
     pcl::Correspondences getCorrespondences();
@@ -30,7 +31,6 @@ public:
     void setPrevTransf(Eigen::Matrix4f prevT);
     void setOflowStop(bool val);
     bool foundOflowTransf();
-    void randomICP(Eigen::Vector3f maxYawPitchRoll, Eigen::Vector3f maxDist, float maxCorDist, float maxFit, int maxIter, float& bestFit, int& numCorresp);
     float getPhotoConsistency();
     float getPhotoConsistency(Eigen::Matrix4f ctransf);
     float getPhotoConsistency(pcl::PointCloud<pcl::PointXYZRGB>& cloudA,pcl::PointCloud<pcl::PointXYZRGB>& cloudB,Eigen::Matrix4f ctransf);

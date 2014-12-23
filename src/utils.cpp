@@ -22,6 +22,17 @@ void setCloudAsNaN(pcl::PointCloud<pcl::PointXYZRGB> &cloud)
     }
 }
 
+void removeFarPoints(pcl::PointCloud<pcl::PointXYZRGB> &cloud, float z)
+{
+    for( size_t m=0; m < cloud.width;m++ ) {
+        for( size_t n=0; n < cloud.height; n++) {
+            if( cloud(m,n).z > z ) {
+                cloud(m,n).x=cloud(m,n).y=cloud(m,n).z = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+    }
+}
+
 void filterMask(const pcl::PointCloud<pcl::PointXYZRGB>& cloudIn, cv::Mat mask,pcl::PointCloud<pcl::PointXYZRGB> &cloudOut) {
 
     for(size_t m=0; m < cloudIn.width; m++) {

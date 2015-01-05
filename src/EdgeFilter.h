@@ -19,7 +19,7 @@ public:
     void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
     void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
     void applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
-                     pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered,int sobelThreshold=50);
+                     pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered,float max_dist);
 
 private:
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr sourceCloud;

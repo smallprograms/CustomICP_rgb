@@ -18,7 +18,7 @@ GraphOptimizer_G2O::GraphOptimizer_G2O()
     g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
     solver->setWriteDebug(true);
-    solver->setUserLambdaInit(0.01);
+    //solver->setUserLambdaInit(0.01);
     optimizer.setAlgorithm(solver);
     /**/
 
@@ -39,16 +39,21 @@ int GraphOptimizer_G2O::addVertex(Eigen::Matrix4d& vertexPose, int id, bool isFi
 //    #endif
 
     //Transform Eigen::Matrix4f into 3D traslation and rotation for g2o
-    yaw = atan2f((float)vertexPose(1,0),(float)vertexPose(0,0));
-    pitch = asinf(-(float)vertexPose(2,0));
-    roll = atan2f((float)vertexPose(2,1),(float)vertexPose(2,2));
+//    yaw = atan2f((float)vertexPose(1,0),(float)vertexPose(0,0));
+//    pitch = asinf(-(float)vertexPose(2,0));
+//    roll = atan2f((float)vertexPose(2,1),(float)vertexPose(2,2));
 
     g2o::Vector3d t(vertexPose(0,3),vertexPose(1,3),vertexPose(2,3));
-    g2o::Quaterniond q;
-    q.x()=sin(roll/2)*cos(pitch/2)*cos(yaw/2)-cos(roll/2)*sin(pitch/2)*sin(yaw/2);
-    q.y()=cos(roll/2)*sin(pitch/2)*cos(yaw/2)+sin(roll/2)*cos(pitch/2)*sin(yaw/2);
-    q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
-    q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
+//    g2o::Quaterniond q;
+//    q.x()=sin(roll/2)*cos(pitch/2)*cos(yaw/2)-cos(roll/2)*sin(pitch/2)*sin(yaw/2);
+//    q.y()=cos(roll/2)*sin(pitch/2)*cos(yaw/2)+sin(roll/2)*cos(pitch/2)*sin(yaw/2);
+//    q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
+//    q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
+
+    Eigen::Matrix3d rot = vertexPose.block(0,0,3,3);
+    g2o::Quaterniond q(rot);
+    q.normalize();
+
 
     //g2o::SE3Quat pose(q,t);	// vertex pose
 
@@ -133,7 +138,8 @@ void GraphOptimizer_G2O::optimizeGraph()
 
     optimizer.setVerbose(true);
     //Run optimization
-    std::cout << "OPTIMIZE ITERATIONS::::: " << optimizer.optimize(100) << "\n";
+    //std::cout << "OPTIMIZE ITERATIONS::::: " << optimizer.optimize(100) << "\n";
+    optimizer.optimize(10);
 
 
 }
@@ -207,16 +213,21 @@ void GraphOptimizer_G2O::loadGraph(std::string fileName)
 }
 void GraphOptimizer_G2O::fillInformationMatrix(Eigen::Matrix<double,6,6>&  infMatrix, float photoCons) {
     float weight = photoCons;
-    if( weight < 10 ) weight = 0;
+
     if( weight > 150 ) weight = 150;
+    else weight = weight - 15; //photoconsistency is noisy for small values, it is never zero...
+
+    if( weight < 0 ) weight = 0;
+
     weight = weight/150;
     weight = 1 - weight; //1 is perfect, 0 is very bad
+    std::cout << "weight " << weight << "\n";
     infMatrix = Eigen::Matrix<double,6,6>::Identity()*weight;
 }
 
 void GraphOptimizer_G2O::genEdgeData(Eigen::Matrix4f guess, pcl::PointCloud<pcl::PointXYZRGB>::Ptr  src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt,  Eigen::Matrix4f& relPose, Eigen::Matrix<double,6,6>&  infMatrix, float& photoCons)
 {
-    CustomICP icp;
+
     pcl::PointCloud<pcl::PointXYZRGB> notUsed(640,480);
     icp.setOflowStop(true);
     icp.setInputSource(src);

@@ -6,6 +6,7 @@
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/registration/icp.h>
+#include <pcl/registration/gicp.h>
 #include <boost/thread/thread.hpp>
 #include "CustomCorrespondenceEstimation.h"
 #include "oflow_pcl.h"
@@ -21,7 +22,7 @@ public:
     CustomICP();
     void setInputSource(pcl::PointCloud<pcl::PointXYZRGB>::Ptr src);
     void setInputTarget(pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt);
-    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess,int sobelThreshold);
+    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess, float max_dist);
     void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess);
     Eigen::Matrix4f getFinalTransformation();
     pcl::Correspondences getCorrespondences();
@@ -41,6 +42,7 @@ private:
     SobelFilter<pcl::PointXYZRGB> sobFilter;
     EdgeFilter edgeFilter;
     pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
+    //pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr src;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt;
     pcl::PointCloud<pcl::PointXYZRGB>  srcNonDense;

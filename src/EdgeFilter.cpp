@@ -16,8 +16,9 @@ void EdgeFilter::setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target)
 }
 
 void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
-                             pcl::PointCloud<pcl::PointXYZRGB>&targetFiltered, int sobelThreshold)
+                             pcl::PointCloud<pcl::PointXYZRGB>&targetFiltered, float max_dist)
 {
+    int sobelThreshold = 50;
     setCloudAsNaN(sourceFiltered);
     setCloudAsNaN(targetFiltered);
     //apply sobel filter to RGB image and get only points with DEPTH not null at depthmap
@@ -50,30 +51,56 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
         cv::warpAffine(sourceBorders, movedSource, transf, cv::Size(sourceBorders.cols,sourceBorders.rows));
         cv::bitwise_and(movedSource,targetBorders,intersectionTarget);
 
-        static bool writeImage=true;
-        if( writeImage )
-            cv::imwrite("before_filter.jpg",intersectionTarget);
 
-        removeNoise(intersectionTarget);
+//        static bool writeImage=true;
+//        if( writeImage )
+//            cv::imwrite("before_filter.jpg",intersectionTarget);
+
+//        removeNoise(intersectionTarget);
 
 
-        if( writeImage ){
-            cv::imwrite("after_filter.jpg",intersectionTarget);
-            writeImage = false;
-        }
+//        if( writeImage ){
+//            cv::imwrite("after_filter.jpg",intersectionTarget);
+//            writeImage = false;
+//        }
         cv::Mat AffineInv;
         cv::invertAffineTransform(transf,AffineInv);
         cv::warpAffine(intersectionTarget, intersectionSource, AffineInv, cv::Size(sourceBorders.cols,sourceBorders.rows));
-
+        using namespace cv;
         for(int m=0; m < intersectionSource.rows; m++) {
             for(int n=0; n < intersectionSource.cols; n++) {
 
+
+
+
                 if( intersectionSource.at<uchar>(m,n) > 150 ) {
-                    sourceFiltered(n,m) = sourceCloud->at(n,m);
+
+                    //convert current image location using affine transform transf (project curr. loc to target depthmap)
+                    Mat srcPoint(3,1,CV_64F);
+
+                    srcPoint.at<double>(0,0)=n;
+                    srcPoint.at<double>(1,0)=m;
+                    srcPoint.at<double>(2,0)=1.0;
+
+                    Mat tgtPoint = transf*srcPoint;
+
+                    int nTarget = tgtPoint.at<double>(0,0)+0.5;
+                    int mTarget = tgtPoint.at<double>(1,0)+0.5;
+
+                    float dist = (targetCloud->at(nTarget,mTarget).x - sourceCloud->at(n,m).x)*(targetCloud->at(nTarget,mTarget).x - sourceCloud->at(n,m).x);
+                    dist += (targetCloud->at(nTarget,mTarget).y - sourceCloud->at(n,m).y)*(targetCloud->at(nTarget,mTarget).y - sourceCloud->at(n,m).y);
+                    dist += (targetCloud->at(nTarget,mTarget).z - sourceCloud->at(n,m).z)*(targetCloud->at(nTarget,mTarget).z - sourceCloud->at(n,m).z);
+                    //const float MAX_DIST=0.03;
+                    //check if both 3D points are near
+                    if( std::sqrt(dist) < max_dist) {
+                        sourceFiltered(n,m) = sourceCloud->at(n,m);
+                        targetFiltered(nTarget,mTarget) = targetCloud->at(nTarget,mTarget);
+                    }
+
                 }
-                if( intersectionTarget.at<uchar>(m,n) > 150 ) {
-                    targetFiltered(n,m) = targetCloud->at(n,m);
-                }
+//                if( intersectionTarget.at<uchar>(m,n) > 150 ) {
+//                    targetFiltered(n,m) = targetCloud->at(n,m);
+//                }
 
             }
         }
@@ -97,13 +124,13 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
 
     }
 
-    removeFarPoints(sourceFiltered,2);
-    removeFarPoints(targetFiltered,2);
+//    removeFarPoints(sourceFiltered,2);
+//    removeFarPoints(targetFiltered,2);
 
 }
 
 
-cv::Mat EdgeFilter::getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,int sobelThreshold) {
+cv::Mat EdgeFilter::getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, int sobelThreshold) {
     cv::Mat imgColor(480,640,CV_8UC3);
     cloudToMat(cloud->makeShared(),imgColor);
 
@@ -214,6 +241,7 @@ cv::Mat EdgeFilter::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& bordersIm
                     float zMean = bordersImage->at(i_min,j_min).z + bordersImage->at(i_max,j_min).z + bordersImage->at(m,j_min).z;
                     zMean += bordersImage->at(m,j_max).z + bordersImage->at(i_min,j_max).z + bordersImage->at(i_max,j_max).z;
                     zMean += bordersImage->at(i_max,n).z + bordersImage->at(i_min,n).z;
+                    //zMean = zMean/8;
 
                     if( bordersImage->at(i_min,j_min).z < zMean ) imgBorder.at<uchar>(j_min,i_min) = 255;
                     if( bordersImage->at(i_max,j_min).z < zMean ) imgBorder.at<uchar>(j_min,i_max) = 255;
@@ -235,7 +263,7 @@ cv::Mat EdgeFilter::getBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr& bordersIm
     }
 
 //    static std::string id("a");
-//    std::string name=std::string("sobel_img")+id+std::string(".jpg");
+//    std::string name=std::string("sobel_and_z")+id+std::string(".jpg");
 //    imwrite(name.c_str(),imgBorder);
 //    if( id=="a") id="b";
 //    else if( id=="b") id="a";

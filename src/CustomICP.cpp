@@ -10,9 +10,8 @@ CustomICP::CustomICP()
     //icp.setCorrespondenceEstimation(
     //boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
 
-    //icp.setMaxCorrespondenceDistance(0.003); //22 sept
-    //std::cout << "\tsetMaxCorrespondenceDistance(0.5) \n NO CUSTOM sobel01\n";
-    icp.setMaxCorrespondenceDistance(0.4);
+    std::cout << "CAAAAA\n\n";
+    icp.setMaxCorrespondenceDistance(0.1);
     icp.setMaximumIterations (100);
     icp.setTransformationEpsilon(1e-8);
     icp.setEuclideanFitnessEpsilon(1e-4);
@@ -70,9 +69,19 @@ inline float photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::
                 if( col < 0 )   col = 0;
                 if( row < 0 )   row = 0;
 
+//                float srcGray =  0.299f * static_cast <float> (srcMoved(j,i).r) +
+//                                 0.587f * static_cast <float> (srcMoved(j,i).g) +
+//                                 0.114f * static_cast <float> (srcMoved(j,i).b);
+
+//                float tgtGray = 0.299f * static_cast <float> (cloudTgt(col,row).r) +
+//                                0.587f * static_cast <float> (cloudTgt(col,row).g) +
+//                                0.114f * static_cast <float> (cloudTgt(col,row).b);
+
                 float colorDiff = ( srcMoved(j,i).b - cloudTgt(col,row).b )* ( srcMoved(j,i).b - cloudTgt(col,row).b );
                 colorDiff += ( srcMoved(j,i).g - cloudTgt(col,row).g )* ( srcMoved(j,i).g - cloudTgt(col,row).g );
                 colorDiff += ( srcMoved(j,i).r - cloudTgt(col,row).r )* ( srcMoved(j,i).r - cloudTgt(col,row).r );
+
+//                float colorDiff = (srcGray - tgtGray)*(srcGray - tgtGray);
                 colorDiff = std::sqrt(colorDiff);
                 diff += colorDiff;
                 count++;
@@ -81,14 +90,11 @@ inline float photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::
         }
     }
 
-    if( count !=0 ) {
-        return diff/count;
-    } else {
-        return 1000;
-    }
+    return diff/count;
+
 }
 
-void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess,int sobelThreshold )
+void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess,float max_dist )
 {
 
     //oflowTransf = Eigen::Matrix4f::Identity();
@@ -99,14 +105,19 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f
 
     edgeFilter.setSourceCloud(src);
     edgeFilter.setTargetCloud(tgt);
-    edgeFilter.applyFilter(sobSrc,sobTgt,sobelThreshold);
+    edgeFilter.applyFilter(sobSrc,sobTgt,max_dist);
 
-    static bool saveSobel=true;
-    if( saveSobel ) {
-        pcl::io::savePCDFileASCII("sobTgtBef.pcd",sobTgt);
-        pcl::io::savePCDFileASCII("sobSrcBef.pcd",sobSrc);
-        saveSobel=false;
-    }
+//    static int saveSobel = true;
+//    if( saveSobel ) {
+//        char name1[100];
+//        char name2[100];
+//        sprintf(name1,"sobTgt%f.pcd",max_dist);
+//        sprintf(name2,"sobSrc%f.pcd",max_dist);
+//        pcl::io::savePCDFileASCII(name1,sobTgt);
+//        pcl::io::savePCDFileASCII(name2,sobSrc);
+//        if( max_dist >= 0.1 )
+//            saveSobel=false;
+//    }
 
     /** Generate clouds without NaN points to work with ICP **/
     tgtNonDense.clear();
@@ -130,35 +141,56 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f
     finalTransf = icp.getFinalTransformation();
 
 
-    /** SECOND ICP WITH SMALLER MAX DISTANCE*/
-    icp.setMaxCorrespondenceDistance(0.05);
-    icp.align(cloud, finalTransf);
-    finalTransf = icp.getFinalTransformation();
-
 }
 
 void CustomICP::align(pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess)
 {
-    int sobThresh = 150;
-    const int MAX_PHOTOCONS = 30;
 
-    align(cloud,guess,sobThresh);
+
+    float max_dist=0.1;
+    const int MAX_PHOTOCONS = 40;
+
+    align(cloud,guess,max_dist);
     Eigen::Matrix4f currTransf = getFinalTransformation();
-    float currPhotoCons = getPhotoConsistency();
-    std::cout << "Obtained " << currPhotoCons << "with thresh: " << sobThresh << "\n";
 
-    sobThresh = 100;
-    while( currPhotoCons > MAX_PHOTOCONS && sobThresh >= 50) {
-
-        align(cloud,guess,sobThresh);
-        float pCons = getPhotoConsistency();
-        std::cout << "Obtained " << pCons << "with thresh: " << sobThresh << "\n";
-        if( pCons < currPhotoCons ) {
-            currPhotoCons = pCons;
-            currTransf = getFinalTransformation();
-        }
-        sobThresh = sobThresh - 50;
+    float currPhotoCons = 1000;
+    float currFitness = 1;
+    if( currTransf != Eigen::Matrix4f::Identity() ) {
+        currPhotoCons = getPhotoConsistency();
+        currFitness = getFitnessScore();
     }
+
+    std::cout << "Obtained " << currPhotoCons << "Fitness" << getFitnessScore() << " with max dist  " << max_dist << "\n";
+
+
+//    max_dist=0.05;
+
+
+//    while( currPhotoCons > MAX_PHOTOCONS && max_dist <= 0.25) {
+
+//        if (getFinalTransformation() != Eigen::Matrix4f::Identity() && getPhotoConsistency() < 40 )
+//            align(cloud,getFinalTransformation(),max_dist);
+//        else
+//            align(cloud,guess,max_dist);
+
+
+//        if( getFinalTransformation() != Eigen::Matrix4f::Identity() ) {
+//            float pCons = getPhotoConsistency();
+//            std::cout << "Obtained " << pCons /*<< "Fitness" << getFitnessScore()*/ << "with max dist: " << max_dist << "\n";
+//            if( pCons < (currPhotoCons-5) || (pCons < currPhotoCons && ((getFitnessScore()*0.05) < currFitness))  || (pCons < (currPhotoCons+5) && getFitnessScore() < (currFitness*0.05) )) {
+//                currPhotoCons = pCons;
+//                currFitness = getFitnessScore();
+//                currTransf = getFinalTransformation();
+//            }
+//        } else {
+//            std::cout << "failed with " << max_dist << "\n";
+//        }
+
+//        max_dist = max_dist + 0.1;
+//        std::cout << max_dist << "\n";
+
+//    }
+//    std::cout << "2end\n";
 
     finalTransf = currTransf;
 }

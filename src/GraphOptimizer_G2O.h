@@ -21,6 +21,7 @@ private:
     int vertexIdx;
     g2o::SparseOptimizer optimizer;
     std::vector<int> vertexIdVec;
+    CustomICP icp;
 
 
 public:

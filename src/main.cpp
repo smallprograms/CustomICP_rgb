@@ -365,8 +365,11 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
     float qw,qx,qy,qz;
 
     Eigen::Matrix4f transf;
+    Eigen::Matrix4f prevTransf;
+    Eigen::Matrix4f relTransf;
     //previous cloud
     pcl::PointCloud<pcl::PointXYZRGB> currCloud(640,480);
+    pcl::PointCloud<pcl::PointXYZRGB> prevCloud(640,480);
     pcl::PointCloud<pcl::PointXYZRGB> finalCloud(640,480);
 
     //global cloud (to register aligned clouds)
@@ -398,6 +401,20 @@ void groundTruthAlign(char* path,int min,int max,char* outFile,char* ground, int
         //        std::cout << "global cloud size after voxel filter: " << globalCloud.size() << "\n";
         finalCloud.clear();
 
+        /** calculate relative transform and photo cons **/
+        if( i != min ) {
+
+            relTransf = prevTransf.inverse()*transf;
+            CustomICP icp;
+            icp.setInputSource(currCloud.makeShared());
+            icp.setInputTarget(prevCloud.makeShared());
+            std::cout << "Photo cons:: " << icp.getPhotoConsistency(relTransf) << "\n";
+
+        }
+        /**/
+
+        pcl::copyPointCloud(currCloud,prevCloud);
+        prevTransf = transf;
         i+=increment;
     }
 
@@ -668,7 +685,8 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 //                }
 //            }
 
-            std::cout << "PHOTO CONS: " << currentPhotoCons << "\n";
+            std::cout << "current photo cons::: " << currentPhotoCons << "\n";
+
 
 //            if( currentPhotoCons > 40 ) {
 //                std::cout << "looking ahead " << "\n";
@@ -693,13 +711,14 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
 //                        }
 //                }
 
-//            }
+//                }
             transfQueue.push_back(icpTransf);
-
+            //round to four decimals
+//            icpTransf.col(3)[0] = roundf(icpTransf.col(3)[0]*10000.0f)/10000.0f;
+//            icpTransf.col(3)[1] = roundf(icpTransf.col(3)[1]*10000.0f)/10000.0f;
+//            icpTransf.col(3)[2] = roundf(icpTransf.col(3)[2]*10000.0f)/10000.0f;
 
             transf = icpTransf.cast<double>() * transf;
-            //convert to quaterion and then go back to rotation matrix
-            reorthogonalizeMatrix(transf);
 
             /**/
 
@@ -724,21 +743,32 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                     //mem leak
                     Eigen::Matrix4f* relPose = new Eigen::Matrix4f;
                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
-                    guess = getBestGuess(icp,surf,i-1,i,prevCloud,currCloud,photoCons);
-                    optimizer.genEdgeData(guess,prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
-                    if( *relPose != Eigen::Matrix4f::Identity() ) {
 
-                        optimizer.addEdge(vertexID,toIndex,*relPose,*infMatrix);
-                        //save edge on .txt files
-                        writeEdge(vertexID,toIndex,*relPose,*infMatrix,outFile);
+                    optimizer.fillInformationMatrix(*infMatrix,currentPhotoCons);
 
-                    }
+//                    guess = getBestGuess(icp,surf,i-1,i,prevCloud,currCloud,photoCons);
+                    //optimizer.genEdgeData(guess,prevCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
+                    //if( *relPose != Eigen::Matrix4f::Identity() ) {
+
+                        optimizer.addEdge(toIndex,vertexID,icpTransf,*infMatrix);
+                        writeEdge(toIndex,vertexID,icpTransf,*infMatrix,outFile);
+
+//                        optimizer.addEdge(vertexID,toIndex,*relPose,*infMatrix);
+//                        //save edge on .txt files
+//                        writeEdge(vertexID,toIndex,*relPose,*infMatrix,outFile);
+
+                    //}
 
                     //add loop closure edges!
                     /**/
-
-                    for( int k=(i-2); k >= poseMap.begin()->first; k=k-1 ) {
-                        const float MAX_METERS = 1;
+                    int prevIndex;
+                    if( currentPhotoCons > 30 ) {
+                        prevIndex = i-2; //add more contraints for current cloud because it was poorly aligned with previous
+                    } else {
+                        prevIndex = i-15;
+                    }
+                    for( int k=prevIndex; k >= poseMap.begin()->first; k=k-1 ) {
+                        const float MAX_METERS = 0.75;
 
                         if ( matrixDistance(poseMap[i],poseMap[k]) < MAX_METERS )  {
 
@@ -755,12 +785,12 @@ void  alignAndView( pcl::visualization::PCLVisualizer* viewer, char* path, int m
                                     Eigen::Matrix<double,6,6>* infMatrix = new Eigen::Matrix<double,6,6>;
                                     float photoCons;
                                     guess = getBestGuess(icp,surf,k,i,pastCloud,currCloud,photoCons);
-                                    if( photoCons < 80 ) {
+                                    if( photoCons < 60 ) {
 
                                         optimizer.genEdgeData(guess,pastCloud.makeShared(),currCloud.makeShared(),*relPose,*infMatrix,photoCons);
 
 
-                                        if( *relPose != Eigen::Matrix4f::Identity() && photoCons < 50 ) {
+                                        if( *relPose != Eigen::Matrix4f::Identity() && photoCons < 30 ) {
 
                                             std::cout << "ADDING LOOP CLOSURE " << k << " - " << i << "\n";
                                             std::cout << "photoCons:" << photoCons << "\n";

@@ -26,6 +26,7 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
     cv::Mat targetBorders = getBorders(targetCloud,sobelThreshold);
     cv::Mat transf = cv::estimateRigidTransform(sourceBorders,targetBorders,false);
 
+    //no transform found :(
     if( transf.rows == 0 ) {
 
         for(int m=0; m < sourceBorders.rows; m++) {
@@ -67,13 +68,15 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
         cv::invertAffineTransform(transf,AffineInv);
         cv::warpAffine(intersectionTarget, intersectionSource, AffineInv, cv::Size(sourceBorders.cols,sourceBorders.rows));
         using namespace cv;
+        int pointCount=0;
+        int totalPointCount=0;
         for(int m=0; m < intersectionSource.rows; m++) {
             for(int n=0; n < intersectionSource.cols; n++) {
 
-
-
+                if( sourceCloud->at(n,m).z > 0.1 ) totalPointCount++;
 
                 if( intersectionSource.at<uchar>(m,n) > 150 ) {
+
 
                     //convert current image location using affine transform transf (project curr. loc to target depthmap)
                     Mat srcPoint(3,1,CV_64F);
@@ -83,29 +86,27 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
                     srcPoint.at<double>(2,0)=1.0;
 
                     Mat tgtPoint = transf*srcPoint;
-
+                    //aprox. to nearest integer
                     int nTarget = tgtPoint.at<double>(0,0)+0.5;
                     int mTarget = tgtPoint.at<double>(1,0)+0.5;
 
                     float dist = (targetCloud->at(nTarget,mTarget).x - sourceCloud->at(n,m).x)*(targetCloud->at(nTarget,mTarget).x - sourceCloud->at(n,m).x);
                     dist += (targetCloud->at(nTarget,mTarget).y - sourceCloud->at(n,m).y)*(targetCloud->at(nTarget,mTarget).y - sourceCloud->at(n,m).y);
                     dist += (targetCloud->at(nTarget,mTarget).z - sourceCloud->at(n,m).z)*(targetCloud->at(nTarget,mTarget).z - sourceCloud->at(n,m).z);
-                    //const float MAX_DIST=0.03;
+
                     //check if both 3D points are near
                     if( std::sqrt(dist) < max_dist) {
                         sourceFiltered(n,m) = sourceCloud->at(n,m);
                         targetFiltered(nTarget,mTarget) = targetCloud->at(nTarget,mTarget);
+                        pointCount++;
                     }
 
                 }
-//                if( intersectionTarget.at<uchar>(m,n) > 150 ) {
-//                    targetFiltered(n,m) = targetCloud->at(n,m);
-//                }
 
             }
         }
-
-
+        std::cout << "total points count: " << totalPointCount << "\n";
+        std::cout << "points count: " << pointCount << "\n";
 //        static std::string id("a");
 //        std::string name=std::string("rotated")+id+std::string(".jpg");
 //        //    imwrite(name.c_str(),outMat);
@@ -124,8 +125,6 @@ void EdgeFilter::applyFilter(pcl::PointCloud<pcl::PointXYZRGB> &sourceFiltered,
 
     }
 
-//    removeFarPoints(sourceFiltered,2);
-//    removeFarPoints(targetFiltered,2);
 
 }
 

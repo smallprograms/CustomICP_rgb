@@ -226,26 +226,7 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     imwrite(name.c_str(),imgC);
     /**/
 
-    /** calculate a median direction, conserve the three points closest to the median direction.
-      this code must be rewrited, just for test **
 
-    std::sort(dirX.begin(),dirX.end());
-    std::sort(dirY.begin(),dirY.end());
-    std::sort(dirZ.begin(),dirZ.end());
-
-    pcl::PointXYZ medianDir;
-    if(dirX.size()%2) {
-        medianDir.x = dirX[dirX.size()/2];
-        medianDir.y = dirY[dirY.size()/2];
-        medianDir.z = dirZ[dirZ.size()/2];
-    } else {
-        medianDir.x = (dirX[dirX.size()/2] + dirX[dirX.size()/2-1])/2;
-        medianDir.y = (dirY[dirY.size()/2] + dirY[dirY.size()/2-1])/2;
-        medianDir.z = (dirZ[dirZ.size()/2] + dirZ[dirZ.size()/2-1])/2;
-    }
-    std::cout << "median dir:" << medianDir << "\n\n";
-
-    /**/
 
     sortCloud(cornersCloudA,cornersCloudB);
 
@@ -258,9 +239,8 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
         maxUsedCorners = 4;
     }
 
-    for(int j=0; j < maxUsedCorners; j++) {
-       // std::cout << "CA1: " << cornersCloudA[j] << "\n";
-       // std::cout << "CB1: " << cornersCloudB[j] << "\n";
+    for(int j=0; j < cornersCloudA.size(); j++) {
+
         float dist = cornersCloudA[j].x - cornersCloudB[j].x;
         dist = dist*dist;
         dist = dist + (cornersCloudA[j].y - cornersCloudB[j].y)*(cornersCloudA[j].y - cornersCloudB[j].y);
@@ -271,22 +251,12 @@ Eigen::Matrix4f getOflow3Dtransf(pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloudA, 
     }
     /**/
 
-    /** Without discarding
-    pcl::Correspondences corrVec;
-    for(int j=0; j< cornersCloudA.size(); j++) {
 
-        float dist = cornersCloudA[j].x - cornersCloudB[j].x;
-        dist = dist*dist;
-        dist = dist + (cornersCloudA[j].y - cornersCloudB[j].y)*(cornersCloudA[j].y - cornersCloudB[j].y);
-        dist = dist + (cornersCloudA[j].z - cornersCloudB[j].z)*(cornersCloudA[j].z - cornersCloudB[j].z);
-        corrVec.push_back(pcl::Correspondence(j,j,dist));
-    }
-    /**/
     pcl::registration::TransformationEstimationSVD<pcl::PointXYZ,pcl::PointXYZ,float_t> tEst;
-    //std::cout << "2244555oflow 3D points A: " << cornersCloudA.size() << " B: " << cornersCloudB.size() << "\n";
-    if(/*finalCornersA.size()*/ cornersCloudA.size() > 2) {
 
-        //tEst.estimateRigidTransformation(finalCornersA,finalCornersB,corrVec,transfMat);
+    if( cornersCloudA.size() > 2) {
+
+
         tEst.estimateRigidTransformation(cornersCloudA,cornersCloudB,corrVec,transfMat);
 
     }

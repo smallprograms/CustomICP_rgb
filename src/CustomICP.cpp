@@ -6,11 +6,7 @@
 
 CustomICP::CustomICP()
 {
-    //customCorresp = new CustomCorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float>;
-    //icp.setCorrespondenceEstimation(
-    //boost::shared_ptr<pcl::registration::CorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float> > (customCorresp));
 
-    std::cout << "CAAAAA\n\n";
     icp.setMaxCorrespondenceDistance(0.1);
     icp.setMaximumIterations (100);
     icp.setTransformationEpsilon(1e-8);
@@ -36,62 +32,14 @@ void CustomICP::setInputTarget( pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt ) {
 
 }
 
-inline float photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::PointCloud<pcl::PointXYZRGB> &cloudTgt,Eigen::Matrix4f transf) {
-    pcl::PointCloud<pcl::PointXYZRGB> srcMoved(640,480);
-    pcl::transformPointCloud(cloudSrc, srcMoved, transf);
+void CustomICP::setPrevTransf(Eigen::Matrix4f prevT)
+{
+    prevTransf = prevT;
+}
 
-    float fx = 525.0;  // focal length x
-    float fy = 525.0;  // focal length y
-    float cx = 319.5;  // optical center x
-    float cy = 239.5;  // optical center y
-
-    float factor = 5000; // for the 16-bit PNG files
-
-    float diff = 0;
-    int count=0;
-    for(int i=0; i < srcMoved.height; i++) {
-        for(int j=0; j < srcMoved.width; j++) {
-
-             if( std::isnan(srcMoved(j,i).x) == false && srcMoved(j,i).z > 0.01) {
-
-                float z = srcMoved(j,i).z;
-                float x = srcMoved(j,i).x;
-                float y = srcMoved(j,i).y;
-
-                float rowf= (y*fy)/z+cy;
-                float colf = (x*fx)/z+cx;
-                //aprox to nearest int
-                int row = rowf+0.5;
-                int col = colf+0.5;
-
-                if( col > 639 ) col = 639;
-                if( row > 479 ) row = 479;
-                if( col < 0 )   col = 0;
-                if( row < 0 )   row = 0;
-
-//                float srcGray =  0.299f * static_cast <float> (srcMoved(j,i).r) +
-//                                 0.587f * static_cast <float> (srcMoved(j,i).g) +
-//                                 0.114f * static_cast <float> (srcMoved(j,i).b);
-
-//                float tgtGray = 0.299f * static_cast <float> (cloudTgt(col,row).r) +
-//                                0.587f * static_cast <float> (cloudTgt(col,row).g) +
-//                                0.114f * static_cast <float> (cloudTgt(col,row).b);
-
-                float colorDiff = ( srcMoved(j,i).b - cloudTgt(col,row).b )* ( srcMoved(j,i).b - cloudTgt(col,row).b );
-                colorDiff += ( srcMoved(j,i).g - cloudTgt(col,row).g )* ( srcMoved(j,i).g - cloudTgt(col,row).g );
-                colorDiff += ( srcMoved(j,i).r - cloudTgt(col,row).r )* ( srcMoved(j,i).r - cloudTgt(col,row).r );
-
-//                float colorDiff = (srcGray - tgtGray)*(srcGray - tgtGray);
-                colorDiff = std::sqrt(colorDiff);
-                diff += colorDiff;
-                count++;
-             }
-
-        }
-    }
-
-    return diff/count;
-
+void CustomICP::setOflowStop(bool val)
+{
+    stopIfOflowFails = val;
 }
 
 void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess,float max_dist )
@@ -134,7 +82,7 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f
             srcNonDense.push_back(sobSrc.at(k));
         }
     }
-    //std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
+    std::cout << "NON DENSE SIZE " << srcNonDense.size() << "\n";
     icp.setInputTarget(tgtNonDense.makeShared());
     icp.setInputSource(srcNonDense.makeShared());
     icp.align(cloud, guess);
@@ -143,12 +91,12 @@ void CustomICP::align( pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f
 
 }
 
-void CustomICP::align(pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess)
+void CustomICP::align(pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f guess, bool loop)
 {
 
 
     float max_dist=0.1;
-    const int MAX_PHOTOCONS = 40;
+    const int MAX_PHOTOCONS = 30;
 
     align(cloud,guess,max_dist);
     Eigen::Matrix4f currTransf = getFinalTransformation();
@@ -160,37 +108,37 @@ void CustomICP::align(pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f 
         currFitness = getFitnessScore();
     }
 
-    std::cout << "Obtained " << currPhotoCons << "Fitness" << getFitnessScore() << " with max dist  " << max_dist << "\n";
+    std::cout << loop << "Obtained " << currPhotoCons << "Fitness" << getFitnessScore() << " with max dist  " << max_dist << "\n";
+
+    //try to improve photocons with different filtering thresholds to point cloud
+    if( loop ) {
+
+        max_dist=0.05f;
 
 
-//    max_dist=0.05;
+        while( currPhotoCons > MAX_PHOTOCONS && max_dist <= 0.26f) {
+
+            if (getFinalTransformation() != Eigen::Matrix4f::Identity() && getPhotoConsistency() < 35 )
+                align(cloud,getFinalTransformation(),max_dist);
+            else
+                align(cloud,guess,max_dist);
 
 
-//    while( currPhotoCons > MAX_PHOTOCONS && max_dist <= 0.25) {
+            if( getFinalTransformation() != Eigen::Matrix4f::Identity() ) {
+                float pCons = getPhotoConsistency();
 
-//        if (getFinalTransformation() != Eigen::Matrix4f::Identity() && getPhotoConsistency() < 40 )
-//            align(cloud,getFinalTransformation(),max_dist);
-//        else
-//            align(cloud,guess,max_dist);
+                if( pCons < (currPhotoCons-10) || (pCons < currPhotoCons && ((getFitnessScore()*2) < currFitness))  || (pCons < (currPhotoCons+10) && getFitnessScore() < (currFitness*0.05) )) {
+                    std::cout << "Improved " << pCons << "Fitness" << getFitnessScore() << "with max dist: " << max_dist << "\n";
+                    currPhotoCons = pCons;
+                    currFitness = getFitnessScore();
+                    currTransf = getFinalTransformation();
+                }
+            }
 
+            max_dist = max_dist + 0.1f;
 
-//        if( getFinalTransformation() != Eigen::Matrix4f::Identity() ) {
-//            float pCons = getPhotoConsistency();
-//            std::cout << "Obtained " << pCons /*<< "Fitness" << getFitnessScore()*/ << "with max dist: " << max_dist << "\n";
-//            if( pCons < (currPhotoCons-5) || (pCons < currPhotoCons && ((getFitnessScore()*0.05) < currFitness))  || (pCons < (currPhotoCons+5) && getFitnessScore() < (currFitness*0.05) )) {
-//                currPhotoCons = pCons;
-//                currFitness = getFitnessScore();
-//                currTransf = getFinalTransformation();
-//            }
-//        } else {
-//            std::cout << "failed with " << max_dist << "\n";
-//        }
-
-//        max_dist = max_dist + 0.1;
-//        std::cout << max_dist << "\n";
-
-//    }
-//    std::cout << "2end\n";
+        }
+    }
 
     finalTransf = currTransf;
 }
@@ -198,8 +146,6 @@ void CustomICP::align(pcl::PointCloud<pcl::PointXYZRGB> &cloud, Eigen::Matrix4f 
 Eigen::Matrix4f CustomICP::getFinalTransformation() {
 
     return finalTransf;
-
-
 }
 
 pcl::Correspondences CustomICP::getCorrespondences()
@@ -217,28 +163,17 @@ pcl::PointCloud<pcl::PointXYZRGB> CustomICP::getTargetFiltered()
     return tgtNonDense;
 }
 
+bool CustomICP::foundOflowTransf()
+{
+    return oflowFound;
+}
+
 double CustomICP::getFitnessScore()
 {
 
     return fitness;
 
 }
-
-void CustomICP::setPrevTransf(Eigen::Matrix4f prevT)
-{
-    prevTransf = prevT;
-}
-
-void CustomICP::setOflowStop(bool val)
-{
-    stopIfOflowFails = val;
-}
-
-bool CustomICP::foundOflowTransf()
-{
-    return oflowFound;
-}
-
 
 float CustomICP::getPhotoConsistency()
 {
@@ -255,4 +190,55 @@ float CustomICP::getPhotoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudA, 
     return photoConsistency(cloudA,cloudB,ctransf);
 }
 
+float CustomICP::photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::PointCloud<pcl::PointXYZRGB> &cloudTgt,Eigen::Matrix4f transf) {
+
+    pcl::PointCloud<pcl::PointXYZRGB> srcMoved(640,480);
+    //apply transformation to source cloud!
+    pcl::transformPointCloud(cloudSrc, srcMoved, transf);
+
+    float fx = 525.0;  // focal length x
+    float fy = 525.0;  // focal length y
+    float cx = 319.5;  // optical center x
+    float cy = 239.5;  // optical center y
+
+    float diff = 0;
+    int count=0;
+
+    //check each pixel of the organized point cloud
+    for(int i=0; i < srcMoved.height; i++) {
+        for(int j=0; j < srcMoved.width; j++) {
+             //check if pixel is valid
+             if( std::isnan(srcMoved(j,i).x) == false && srcMoved(j,i).z > 0.01) {
+
+                float z = srcMoved(j,i).z;
+                float x = srcMoved(j,i).x;
+                float y = srcMoved(j,i).y;
+                //project current 3D point to 2D image plane
+                float rowf= (y*fy)/z+cy;
+                float colf = (x*fx)/z+cx;
+                //aprox to nearest int
+                int row = rowf+0.5;
+                int col = colf+0.5;
+
+                if( col > 639 ) col = 639;
+                if( row > 479 ) row = 479;
+                if( col < 0 )   col = 0;
+                if( row < 0 )   row = 0;
+
+                //euclidean dist between target image rgb pixel and projected 3D source "moved" pixel in target image
+                float colorDiff = ( srcMoved(j,i).b - cloudTgt(col,row).b )* ( srcMoved(j,i).b - cloudTgt(col,row).b );
+                colorDiff += ( srcMoved(j,i).g - cloudTgt(col,row).g )* ( srcMoved(j,i).g - cloudTgt(col,row).g );
+                colorDiff += ( srcMoved(j,i).r - cloudTgt(col,row).r )* ( srcMoved(j,i).r - cloudTgt(col,row).r );
+
+                colorDiff = std::sqrt(colorDiff);
+                diff += colorDiff;
+                count++;
+             }
+
+        }
+    }
+    //calculate average euclidean dist of RGB colors!
+    return diff/count;
+
+}
 

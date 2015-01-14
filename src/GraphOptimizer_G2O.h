@@ -17,12 +17,6 @@
 /*!This class encapsulates the functionality of the G2O library to perform 6D graph optimization.*/
 class GraphOptimizer_G2O
 {
-private:
-    int vertexIdx;
-    g2o::SparseOptimizer optimizer;
-    std::vector<int> vertexIdVec;
-    CustomICP icp;
-
 
 public:
   GraphOptimizer_G2O();
@@ -43,5 +37,12 @@ offset is summed to vertex indexs in order to know point cloud id!*/
   void genEdgeData(Eigen::Matrix4f guess,pcl::PointCloud<pcl::PointXYZRGB>::Ptr src, pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt,
                    Eigen::Matrix4f& relPose,Eigen::Matrix<double,6,6>& infMatrix, float& photoCons);
   void fillInformationMatrix(Eigen::Matrix<double,6,6>&  infMatrix, float photoCons);
+
+private:
+    int vertexIdx;
+    g2o::SparseOptimizer optimizer;
+    std::vector<int> vertexIdVec;
+    CustomICP icp;
+
 
 };

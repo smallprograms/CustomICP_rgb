@@ -1,7 +1,6 @@
 #define ENABLE_DEBUG_G2O 0 //Don't enable if not necessary
 
 #include "GraphOptimizer_G2O.h"
-#include "PhotoEdge.h"
 
 #if ENABLE_DEBUG_G2O
 #include "../include/Miscellaneous.h" //Save matrix
@@ -11,17 +10,13 @@ GraphOptimizer_G2O::GraphOptimizer_G2O()
 {
 
     optimizer.setVerbose(true);
-    // variable-size block solver
-    /**/
-    //g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver = new g2o::LinearSolverCholmod<g2o::BlockSolver_6_3::PoseMatrixType>();
     g2o::BlockSolver_6_3 * solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
     g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
-    solver->setWriteDebug(true);
-    //solver->setUserLambdaInit(0.01);
-    optimizer.setAlgorithm(solver);
-    /**/
 
+    solver->setWriteDebug(true);
+    optimizer.setAlgorithm(solver);
 
     //Set the vertex index to 0
     vertexIdx=0;
@@ -29,33 +24,12 @@ GraphOptimizer_G2O::GraphOptimizer_G2O()
 
 int GraphOptimizer_G2O::addVertex(Eigen::Matrix4d& vertexPose, int id, bool isFixed)
 {
-    static double yaw,pitch,roll;
-
-//    #if ENABLE_DEBUG_G2O
-////    char* fileName = (char*) malloc(100);
-////    std::sprintf(fileName,"../results/matrices/pose_%i.txt",vertexIdx);
-////    Miscellaneous::saveMatrix(vertexPose.cast<float>(),fileName);
-////    delete fileName;
-//    #endif
-
-    //Transform Eigen::Matrix4f into 3D traslation and rotation for g2o
-//    yaw = atan2f((float)vertexPose(1,0),(float)vertexPose(0,0));
-//    pitch = asinf(-(float)vertexPose(2,0));
-//    roll = atan2f((float)vertexPose(2,1),(float)vertexPose(2,2));
 
     g2o::Vector3d t(vertexPose(0,3),vertexPose(1,3),vertexPose(2,3));
-//    g2o::Quaterniond q;
-//    q.x()=sin(roll/2)*cos(pitch/2)*cos(yaw/2)-cos(roll/2)*sin(pitch/2)*sin(yaw/2);
-//    q.y()=cos(roll/2)*sin(pitch/2)*cos(yaw/2)+sin(roll/2)*cos(pitch/2)*sin(yaw/2);
-//    q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
-//    q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
 
     Eigen::Matrix3d rot = vertexPose.block(0,0,3,3);
     g2o::Quaterniond q(rot);
     q.normalize();
-
-
-    //g2o::SE3Quat pose(q,t);	// vertex pose
 
     // set up node
     g2o::VertexSE3 *vc = new g2o::VertexSE3();
@@ -83,8 +57,6 @@ void GraphOptimizer_G2O::addEdge(const int fromIdx,
                                  Eigen::Matrix4f& relativePose,
                                  Eigen::Matrix<double,6,6>& informationMatrix)
 {
-    static double yaw,pitch,roll;
-
     #if ENABLE_DEBUG_G2O
     char* fileName = (char*) malloc(100);
     std::sprintf(fileName,"../results/matrices/edge_%i_to_%i.txt",fromIdx,toIdx);
@@ -93,35 +65,18 @@ void GraphOptimizer_G2O::addEdge(const int fromIdx,
     #endif
 
     //Transform Eigen::Matrix4f into 3D traslation and rotation for g2o
-    yaw = atan2f(relativePose(1,0),relativePose(0,0));
-    pitch = asinf(-relativePose(2,0));
-    roll = atan2f(relativePose(2,1),relativePose(2,2));
-
     g2o::Vector3d t(relativePose(0,3),relativePose(1,3),relativePose(2,3));
     g2o::Quaterniond q;
-    q.x()=sin(roll/2)*cos(pitch/2)*cos(yaw/2)-cos(roll/2)*sin(pitch/2)*sin(yaw/2);
-    q.y()=cos(roll/2)*sin(pitch/2)*cos(yaw/2)+sin(roll/2)*cos(pitch/2)*sin(yaw/2);
-    q.z()=cos(roll/2)*cos(pitch/2)*sin(yaw/2)-sin(roll/2)*sin(pitch/2)*cos(yaw/2);
-    q.w()=cos(roll/2)*cos(pitch/2)*cos(yaw/2)+sin(roll/2)*sin(pitch/2)*sin(yaw/2);
-
-    //std::cout << "RELATIVE POSE:::: \n\n" << relativePose << "\n";
-
-
-    g2o::Quaternionf q2;
-    Eigen::Matrix3f rot = relativePose.block(0,0,3,3);
-    q2 = rot;
+    Eigen::Matrix3d rot = relativePose.block(0,0,3,3).cast<double>();
+    q = rot;
 
 
     g2o::SE3Quat transf(q,t);	// relative transformation
 
     g2o::EdgeSE3* edge = new g2o::EdgeSE3;
-    //g2o::PhotoEdge* edge = new g2o::PhotoEdge;
     edge->vertices()[0] = optimizer.vertex(fromIdx);
     edge->vertices()[1] = optimizer.vertex(toIdx);
     edge->setMeasurement(transf);
-//    edge->setOffset(offset); //to recover cloud id
-//    edge->setCloudsPath(cloudsPath); //place where point clouds are in hd
-    //Set the information matrix to identity
     edge->setInformation(informationMatrix);
 
     optimizer.addEdge(edge);
@@ -133,12 +88,8 @@ void GraphOptimizer_G2O::optimizeGraph()
     //Prepare and run the optimization
     std::cout << "PREPARING OPT:: " << optimizer.initializeOptimization() << "\n";
 
-    //Set the initial Levenberg-Marquardt lambda
-    //optimizer.setUserLambdaInit(0.01);
 
     optimizer.setVerbose(true);
-    //Run optimization
-    //std::cout << "OPTIMIZE ITERATIONS::::: " << optimizer.optimize(100) << "\n";
     optimizer.optimize(10);
 
 
@@ -232,7 +183,8 @@ void GraphOptimizer_G2O::genEdgeData(Eigen::Matrix4f guess, pcl::PointCloud<pcl:
     icp.setOflowStop(true);
     icp.setInputSource(src);
     icp.setInputTarget(tgt);
-    icp.align(notUsed, guess);
+    const bool LOOP=false;
+    icp.align(notUsed, guess,LOOP);
     relPose = icp.getFinalTransformation();
     photoCons = icp.getPhotoConsistency();
     fillInformationMatrix(infMatrix,photoCons);

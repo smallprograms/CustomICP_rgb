@@ -15,6 +15,7 @@
 class EdgeFilter
 {
 public:
+
     EdgeFilter();
     void setSourceCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &source);
     void setTargetCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &target);
@@ -22,10 +23,6 @@ public:
                      pcl::PointCloud<pcl::PointXYZRGB> &targetFiltered,float max_dist);
 
 private:
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr sourceCloud;
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr targetCloud;
-    size_t win_width;
-    size_t win_height;
 
     cv::Mat getSobelBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud,int sobelThreshold=50);
     cv::Mat getCannyBorders(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
@@ -38,8 +35,13 @@ private:
                                                            const cv::Mat& visitedImage, int row, int col);
 
     bool hasSomeNeighBoor(const cv::Mat& img,int row, int col, int dist);
-    /** try to remove isolated blobs from image, we want only long borders */
+    /** try to remove isolated blobs from image, to get only long borders */
     void removeNoise(cv::Mat& bordersImage);
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr sourceCloud;
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr targetCloud;
+    size_t win_width;
+    size_t win_height;
 };
 
 #endif // EDGEFILTER_H

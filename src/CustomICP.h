@@ -8,7 +8,6 @@
 #include <pcl/registration/icp.h>
 #include <pcl/registration/gicp.h>
 #include <boost/thread/thread.hpp>
-#include "CustomCorrespondenceEstimation.h"
 #include "oflow_pcl.h"
 #include "BilateralFilter.h"
 #include <pcl/filters/fast_bilateral.h>
@@ -22,27 +21,29 @@ public:
     CustomICP();
     void setInputSource(pcl::PointCloud<pcl::PointXYZRGB>::Ptr src);
     void setInputTarget(pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt);
+    void setPrevTransf(Eigen::Matrix4f prevT);
+    void setOflowStop(bool val);
+
     void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess, float max_dist);
-    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess);
+    void align(pcl::PointCloud<pcl::PointXYZRGB>& cloud, Eigen::Matrix4f guess, bool loop);
+
     Eigen::Matrix4f getFinalTransformation();
     pcl::Correspondences getCorrespondences();
     pcl::PointCloud<pcl::PointXYZRGB> getSourceFiltered();
     pcl::PointCloud<pcl::PointXYZRGB> getTargetFiltered();
-    double getFitnessScore();
-    void setPrevTransf(Eigen::Matrix4f prevT);
-    void setOflowStop(bool val);
+
     bool foundOflowTransf();
+    double getFitnessScore();
     float getPhotoConsistency();
     float getPhotoConsistency(Eigen::Matrix4f ctransf);
     float getPhotoConsistency(pcl::PointCloud<pcl::PointXYZRGB>& cloudA,pcl::PointCloud<pcl::PointXYZRGB>& cloudB,Eigen::Matrix4f ctransf);
+    float photoConsistency(pcl::PointCloud<pcl::PointXYZRGB> &cloudSrc, pcl::PointCloud<pcl::PointXYZRGB> &cloudTgt,Eigen::Matrix4f transf);
 
 private:
-    //use our custom correspondences estimator
-    CustomCorrespondenceEstimation<pcl::PointXYZRGB,pcl::PointXYZRGB,float>* customCorresp;
+
     SobelFilter<pcl::PointXYZRGB> sobFilter;
     EdgeFilter edgeFilter;
     pcl::IterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
-    //pcl::GeneralizedIterativeClosestPoint<pcl::PointXYZRGB, pcl::PointXYZRGB> icp;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr src;
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr tgt;
     pcl::PointCloud<pcl::PointXYZRGB>  srcNonDense;
@@ -55,8 +56,6 @@ private:
     bool stopIfOflowFails;
     pcl::Correspondences correspondences;
     pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
-    //voxelFilter.setLeafSize(0.005,0.005,0.005);
-
 
 };
 

@@ -22,10 +22,6 @@ AlignSystem::AlignSystem(char *cloudsPath_, char *outFile_, char *global_, int m
 void  AlignSystem::align( bool loadedGlobal ) {
 
     pcl::FastBilateralFilter<pcl::PointXYZRGB> fastBilFilter;
-    pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
-    const float METERS_SIDE=0.01;
-    //set voxel size in meters
-    voxelFilter.setLeafSize(METERS_SIDE,METERS_SIDE,METERS_SIDE);
     //uncomment to see icp iterations stuff
     //pcl::console::setVerbosityLevel(pcl::console::L_DEBUG);
 
@@ -165,7 +161,7 @@ void  AlignSystem::align( bool loadedGlobal ) {
 void AlignSystem::groundTruthAlign(char* ground, int increment ) {
 
     pcl::VoxelGrid<pcl::PointXYZRGB> voxelFilter;
-    voxelFilter.setLeafSize(0.01,0.01,0.01);
+    voxelFilter.setLeafSize(0.0055,0.0055,0.0055);
 
     std::string groundT(ground);
     std::ifstream groundFile(groundT.c_str());
